@@ -117,25 +117,51 @@ impl CommitNode {
 
     fn get_dot_node(&self) -> String {
         let mut label_parts = Vec::new();
+        let mut color = "white"; // Default color
 
         // Only show commit hash if no refs or tags are present
         if self.refs.is_empty() && self.tags.is_empty() {
             label_parts.push(self._short_id.clone());
         }
 
-        // Add all reference names (branches, remotes, HEAD)
+        // Determine color priority: local branches > remote branches > other refs > tags
+        let mut has_local_branch = false;
+        let mut has_remote_branch = false;
+        let mut has_other_refs = false;
+
+        // Add all reference names (branches, remotes, HEAD) with color coding
         if !self.refs.is_empty() {
-            let refs_str = self
-                .refs
-                .iter()
-                .map(|r| {
-                    r.trim_start_matches("refs/heads/")
-                        .trim_start_matches("refs/remotes/")
-                        .trim_start_matches("refs/")
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            label_parts.push(format!("[{}]", refs_str));
+            let mut local_branches = Vec::new();
+            let mut remote_branches = Vec::new();
+            let mut other_refs = Vec::new();
+
+            for r in &self.refs {
+                if r.starts_with("refs/heads/") {
+                    local_branches.push(r.trim_start_matches("refs/heads/"));
+                    has_local_branch = true;
+                } else if r.starts_with("refs/remotes/") {
+                    remote_branches.push(r.trim_start_matches("refs/remotes/"));
+                    has_remote_branch = true;
+                } else {
+                    other_refs.push(r.trim_start_matches("refs/"));
+                    has_other_refs = true;
+                }
+            }
+
+            let mut ref_parts = Vec::new();
+            if !local_branches.is_empty() {
+                ref_parts.push(local_branches.join(", "));
+            }
+            if !remote_branches.is_empty() {
+                ref_parts.push(remote_branches.join(", "));
+            }
+            if !other_refs.is_empty() {
+                ref_parts.push(other_refs.join(", "));
+            }
+
+            if !ref_parts.is_empty() {
+                label_parts.push(format!("[{}]", ref_parts.join(", ")));
+            }
         }
 
         // Add tags separately
@@ -149,6 +175,17 @@ impl CommitNode {
             label_parts.push(format!("({})", tags_str));
         }
 
+        // Set color based on priority: local > other refs > remote > tags
+        if has_local_branch {
+            color = "lightblue"; // Local branches - light blue
+        } else if has_other_refs {
+            color = "lightyellow"; // Other refs (HEAD, ROOT) - light yellow
+        } else if has_remote_branch {
+            color = "lightgreen"; // Remote branches - light green
+        } else if !self.tags.is_empty() {
+            color = "lightcoral"; // Tags - light coral/pink (only if no branches)
+        }
+
         let mut label = label_parts.join(" ");
 
         if self.is_tip {
@@ -156,8 +193,8 @@ impl CommitNode {
         }
 
         format!(
-            "\"{}\" [label=\"{}\", shape=box, style=filled, color=black, fillcolor=white]",
-            self.id, label
+            "\"{}\" [label=\"{}\", shape=box, style=filled, color=black, fillcolor={}]",
+            self.id, label, color
         )
     }
 }
@@ -254,6 +291,9 @@ impl GitGraphviz {
             self.add_tagged_commits(&mut referenced_commits)?;
         }
 
+        // Add root commits (commits with no parents) as if they were referenced
+        self.add_root_commits(&mut referenced_commits)?;
+
         // Mark tips
         for tip_id in branch_tips.values() {
             if let Some(commit) = referenced_commits.get_mut(tip_id) {
@@ -336,6 +376,27 @@ impl GitGraphviz {
             let commit_id = self.add_ref_commit(all_commits, commit_oid)?;
             if let Some(commit_node) = all_commits.get_mut(&commit_id) {
                 commit_node.add_tag(tag_name);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn add_root_commits(&self, all_commits: &mut HashMap<String, CommitNode>) -> Result<()> {
+        let mut revwalk = self.repo.revwalk()?;
+        revwalk.push_head()?;
+        revwalk.set_sorting(git2::Sort::TOPOLOGICAL)?;
+
+        for oid_result in revwalk {
+            let oid = oid_result?;
+            if let Ok(commit) = self.repo.find_commit(oid) {
+                // If this commit has no parents, it's a root commit
+                if commit.parent_count() == 0 {
+                    let commit_id = self.add_ref_commit(all_commits, oid)?;
+                    if let Some(commit_node) = all_commits.get_mut(&commit_id) {
+                        commit_node.add_ref("ROOT".to_string());
+                    }
+                }
             }
         }
 
