@@ -1,0 +1,25 @@
+Test file with special characters that might cause DOT syntax issues:
+
+- Quotes: "double quotes" and 'single quotes'
+- Backslashes: C:\Windows\System32\test.exe
+- Newlines and line breaks in commit messages
+- Unicode characters: 🔥 💻 ⚡ 🚀 ✨
+- Ampersands & angle brackets: <script> & </script>
+- Percent signs: 100% complete
+- Dollar signs: $PATH and ${VARIABLE}
+- Asterisks: *bold* and **very bold**
+- Parentheses: (test) and [brackets]
+- Curly braces: {object: "value"}
+- Semicolons; and colons: key:value
+- Pipe symbols: grep "test" | sort
+- Hash symbols: #hashtag #define MACRO
+- At symbols: user@domain.com
+- Plus signs: C++ and git add .
+- Equal signs: var = value
+- Question marks: What? Why?
+- Exclamation marks: Hello! World!
+- Commas, periods, and other punctuation...
+
+This file tests how the GGV tool handles various special characters
+that could potentially break DOT file syntax or cause rendering issues
+when displayed in commit message labels or branch descriptions.

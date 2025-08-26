@@ -80,6 +80,7 @@ struct CommitNode {
     refs: BTreeSet<String>,
     is_tip: bool,
     _parents: Vec<String>,
+    branch_readme: Option<String>,
 }
 
 impl CommitNode {
@@ -100,6 +101,7 @@ impl CommitNode {
             refs: BTreeSet::new(),
             is_tip: false,
             _parents,
+            branch_readme: None,
         }
     }
 
@@ -109,6 +111,10 @@ impl CommitNode {
 
     fn add_ref(&mut self, ref_name: String) {
         self.refs.insert(ref_name);
+    }
+
+    fn set_branch_readme(&mut self, readme: String) {
+        self.branch_readme = Some(readme);
     }
 
     fn set_tip(&mut self, is_tip: bool) {
@@ -160,7 +166,7 @@ impl CommitNode {
             }
 
             if !ref_parts.is_empty() {
-                label_parts.push(format!("[{}]", ref_parts.join(", ")));
+                label_parts.push(ref_parts.join(", "));
             }
         }
 
@@ -172,7 +178,7 @@ impl CommitNode {
                 .map(|t| format!("🏷️ {}", t.trim_start_matches("refs/tags/")))
                 .collect::<Vec<_>>()
                 .join(", ");
-            label_parts.push(format!("({})", tags_str));
+            label_parts.push(tags_str);
         }
 
         // Set color based on priority: local > other refs > remote > tags
@@ -190,6 +196,11 @@ impl CommitNode {
 
         if self.is_tip {
             label = format!("{} ⭐", label);
+        }
+
+        // Add branch readme if available
+        if let Some(readme) = &self.branch_readme {
+            label = format!("{}\\n📄 {}", label, readme);
         }
 
         // Choose shape based on reference type
@@ -307,6 +318,9 @@ impl GitGraphviz {
         // Add root commits (commits with no parents) as if they were referenced
         self.add_root_commits(&mut referenced_commits)?;
 
+        // Add branch readme information
+        self.add_branch_readmes(&mut referenced_commits, &branch_tips)?;
+
         // Mark tips
         for tip_id in branch_tips.values() {
             if let Some(commit) = referenced_commits.get_mut(tip_id) {
@@ -419,6 +433,70 @@ impl GitGraphviz {
             }
         }
 
+        Ok(())
+    }
+
+    fn add_branch_readmes(
+        &self,
+        all_commits: &mut HashMap<String, CommitNode>,
+        branch_tips: &HashMap<String, String>,
+    ) -> Result<()> {
+        for (branch_ref, commit_id) in branch_tips {
+            if let Some(_branch_name) = branch_ref.strip_prefix("refs/heads/") {
+                if let Ok(commit_oid) = commit_id.parse::<Oid>() {
+                    if let Ok(commit) = self.repo.find_commit(commit_oid) {
+                        if let Ok(tree) = commit.tree() {
+                            if let Some(entry) = tree.get_name("BRANCHREADME.md") {
+                                if let Ok(blob) = self.repo.find_blob(entry.id()) {
+                                    if let Ok(content) = std::str::from_utf8(blob.content()) {
+                                        if let Some(first_line) = content.lines().next() {
+                                            if !first_line.trim().is_empty() {
+                                                if let Some(commit_node) =
+                                                    all_commits.get_mut(commit_id)
+                                                {
+                                                    // Wrap long lines at word boundaries
+                                                    let wrapped = if first_line.len() > 30 {
+                                                        let words: Vec<&str> =
+                                                            first_line.split_whitespace().collect();
+                                                        let mut lines = Vec::new();
+                                                        let mut current_line = String::new();
+
+                                                        for word in words {
+                                                            if current_line.len() + word.len() + 1
+                                                                > 30
+                                                            {
+                                                                if !current_line.is_empty() {
+                                                                    lines.push(current_line);
+                                                                    current_line = word.to_string();
+                                                                } else {
+                                                                    lines.push(word.to_string());
+                                                                }
+                                                            } else {
+                                                                if !current_line.is_empty() {
+                                                                    current_line.push(' ');
+                                                                }
+                                                                current_line.push_str(word);
+                                                            }
+                                                        }
+                                                        if !current_line.is_empty() {
+                                                            lines.push(current_line);
+                                                        }
+                                                        lines.join("\\n")
+                                                    } else {
+                                                        first_line.to_string()
+                                                    };
+                                                    commit_node.set_branch_readme(wrapped);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
