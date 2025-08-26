@@ -77,6 +77,7 @@ struct CommitNode {
     _message: String,
     timestamp: i64,
     tags: BTreeSet<String>,
+    refs: BTreeSet<String>,
     is_tip: bool,
     _parents: Vec<String>,
 }
@@ -96,6 +97,7 @@ impl CommitNode {
             _message,
             timestamp,
             tags: BTreeSet::new(),
+            refs: BTreeSet::new(),
             is_tip: false,
             _parents,
         }
@@ -105,13 +107,38 @@ impl CommitNode {
         self.tags.insert(tag);
     }
 
+    fn add_ref(&mut self, ref_name: String) {
+        self.refs.insert(ref_name);
+    }
+
     fn set_tip(&mut self, is_tip: bool) {
         self.is_tip = is_tip;
     }
 
     fn get_dot_node(&self) -> String {
-        let mut label = self._short_id.clone();
+        let mut label_parts = Vec::new();
 
+        // Only show commit hash if no refs or tags are present
+        if self.refs.is_empty() && self.tags.is_empty() {
+            label_parts.push(self._short_id.clone());
+        }
+
+        // Add all reference names (branches, remotes, HEAD)
+        if !self.refs.is_empty() {
+            let refs_str = self
+                .refs
+                .iter()
+                .map(|r| {
+                    r.trim_start_matches("refs/heads/")
+                        .trim_start_matches("refs/remotes/")
+                        .trim_start_matches("refs/")
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            label_parts.push(format!("[{}]", refs_str));
+        }
+
+        // Add tags separately
         if !self.tags.is_empty() {
             let tags_str = self
                 .tags
@@ -119,8 +146,10 @@ impl CommitNode {
                 .map(|t| t.trim_start_matches("refs/tags/"))
                 .collect::<Vec<_>>()
                 .join(", ");
-            label = format!("[{}]", tags_str);
+            label_parts.push(format!("({})", tags_str));
         }
+
+        let mut label = label_parts.join(" ");
 
         if self.is_tip {
             label = format!("{} {{TIP}}", label);
@@ -131,7 +160,6 @@ impl CommitNode {
             self.id, label
         )
     }
-
 }
 
 impl PartialEq for CommitNode {
@@ -185,6 +213,9 @@ impl GitGraphviz {
 
                 if let Some(oid) = branch.get().target() {
                     let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
+                    if let Some(commit_node) = referenced_commits.get_mut(&commit_id) {
+                        commit_node.add_ref(ref_name.clone());
+                    }
                     branch_tips.insert(ref_name, commit_id);
                 }
             }
@@ -199,6 +230,9 @@ impl GitGraphviz {
 
                 if let Some(oid) = branch.get().target() {
                     let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
+                    if let Some(commit_node) = referenced_commits.get_mut(&commit_id) {
+                        commit_node.add_ref(ref_name.clone());
+                    }
                     branch_tips.insert(ref_name, commit_id);
                 }
             }
@@ -208,6 +242,9 @@ impl GitGraphviz {
             if let Ok(head) = self.repo.head() {
                 if let Some(oid) = head.target() {
                     let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
+                    if let Some(commit_node) = referenced_commits.get_mut(&commit_id) {
+                        commit_node.add_ref("HEAD".to_string());
+                    }
                     branch_tips.insert("HEAD".to_string(), commit_id);
                 }
             }
@@ -237,13 +274,10 @@ impl GitGraphviz {
             writeln!(writer, "  {}", commit.get_dot_node())?;
         }
 
-        // Write direct connections between referenced commits
+        // Write connections between commits in the condensed graph
         for commit in condensed_graph.values() {
-            let connections = self.find_connections_to_referenced_commits(
-                &commit.id,
-                &condensed_graph,
-                &referenced_commits,
-            )?;
+            let connections =
+                self.find_condensed_connections(&commit.id, &condensed_graph, &referenced_commits)?;
 
             for connection_id in connections {
                 if condensed_graph.contains_key(&connection_id) {
@@ -274,7 +308,6 @@ impl GitGraphviz {
 
         Ok(oid_str)
     }
-
 
     fn add_tagged_commits(&self, all_commits: &mut HashMap<String, CommitNode>) -> Result<()> {
         // Collect tag info first, then add commits
@@ -315,31 +348,31 @@ impl GitGraphviz {
     ) -> Result<HashMap<String, CommitNode>> {
         let mut condensed_graph = referenced_commits.clone();
 
-        // Find junction commits - commits that are merge points connecting referenced commits
-        // but are not themselves referenced
-        let mut junctions = HashMap::new();
+        // Find junction commits and necessary intermediate commits to maintain connectivity
+        let mut additional_commits = HashMap::new();
 
+        // Find connections between all pairs of referenced commits
         for commit_id in referenced_commits.keys() {
-            self.find_junction_commits(commit_id, referenced_commits, &mut junctions)?;
+            self.find_connection_path(commit_id, referenced_commits, &mut additional_commits)?;
         }
 
-        // Add junction commits to the condensed graph
-        for (junction_id, junction_commit) in junctions {
-            condensed_graph.insert(junction_id, junction_commit);
+        // Add only the necessary intermediate commits
+        for (commit_id, commit_node) in additional_commits {
+            condensed_graph.entry(commit_id).or_insert(commit_node);
         }
 
         Ok(condensed_graph)
     }
 
-    fn find_junction_commits(
+    fn find_connection_path(
         &self,
         start_commit_id: &str,
         referenced_commits: &HashMap<String, CommitNode>,
-        junctions: &mut HashMap<String, CommitNode>,
+        additional_commits: &mut HashMap<String, CommitNode>,
     ) -> Result<()> {
         let mut visited = std::collections::HashSet::new();
         let mut to_visit = Vec::new();
-        let max_depth = 50; // Limit depth to prevent very long searches
+        let max_depth = 100; // Limit search depth
 
         if let Ok(start_oid) = start_commit_id.parse::<Oid>() {
             to_visit.push((start_oid, 0));
@@ -358,11 +391,9 @@ impl GitGraphviz {
             visited.insert(current_id.clone());
 
             if let Ok(commit) = self.repo.find_commit(current_oid) {
-                // If this commit has multiple parents (merge commit) and connects
-                // to referenced commits through different paths, it's a junction
+                // If this commit is a merge commit, it might be a necessary junction
                 if commit.parent_count() > 1 && !referenced_commits.contains_key(&current_id) {
                     let mut connects_to_refs = 0;
-
                     for parent_id in commit.parent_ids() {
                         if self.connects_to_referenced_commit(
                             &parent_id.to_string(),
@@ -374,11 +405,11 @@ impl GitGraphviz {
 
                     if connects_to_refs > 1 {
                         let junction_commit = CommitNode::new(&commit);
-                        junctions.insert(current_id.clone(), junction_commit);
+                        additional_commits.insert(current_id.clone(), junction_commit);
                     }
                 }
 
-                // Continue traversing parents
+                // Continue traversing parents, but only if they might connect to other refs
                 for parent_id in commit.parent_ids() {
                     let parent_id_str = parent_id.to_string();
                     if !referenced_commits.contains_key(&parent_id_str) {
@@ -432,11 +463,11 @@ impl GitGraphviz {
         Ok(false)
     }
 
-    fn find_connections_to_referenced_commits(
+    fn find_condensed_connections(
         &self,
         commit_id: &str,
         condensed_graph: &HashMap<String, CommitNode>,
-        referenced_commits: &HashMap<String, CommitNode>,
+        _referenced_commits: &HashMap<String, CommitNode>,
     ) -> Result<Vec<String>> {
         let mut connections = Vec::new();
         let mut visited = std::collections::HashSet::new();
@@ -444,10 +475,9 @@ impl GitGraphviz {
         if let Ok(commit_oid) = commit_id.parse::<Oid>() {
             if let Ok(commit) = self.repo.find_commit(commit_oid) {
                 for parent_id in commit.parent_ids() {
-                    let connection = self.find_next_referenced_commit(
+                    let connection = self.find_next_condensed_commit(
                         &parent_id.to_string(),
                         condensed_graph,
-                        referenced_commits,
                         &mut visited,
                     )?;
 
@@ -461,11 +491,10 @@ impl GitGraphviz {
         Ok(connections)
     }
 
-    fn find_next_referenced_commit(
+    fn find_next_condensed_commit(
         &self,
         start_commit_id: &str,
         condensed_graph: &HashMap<String, CommitNode>,
-        _referenced_commits: &HashMap<String, CommitNode>,
         visited: &mut std::collections::HashSet<String>,
     ) -> Result<Option<String>> {
         let mut to_visit = Vec::new();
@@ -482,7 +511,7 @@ impl GitGraphviz {
                 return Ok(Some(current_id));
             }
 
-            // Otherwise, traverse parents to find the next referenced commit
+            // Otherwise, traverse parents to find the next condensed commit
             if let Ok(commit_oid) = current_id.parse::<Oid>() {
                 if let Ok(commit) = self.repo.find_commit(commit_oid) {
                     for parent_id in commit.parent_ids() {
@@ -497,7 +526,6 @@ impl GitGraphviz {
 
         Ok(None)
     }
-
 }
 
 fn generate_svg(dot_path: &str) -> Result<String> {
