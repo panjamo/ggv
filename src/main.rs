@@ -137,13 +137,13 @@ impl CommitNode {
 
             for r in &self.refs {
                 if r.starts_with("refs/heads/") {
-                    local_branches.push(r.trim_start_matches("refs/heads/"));
+                    local_branches.push(format!("🌿 {}", r.trim_start_matches("refs/heads/")));
                     has_local_branch = true;
                 } else if r.starts_with("refs/remotes/") {
-                    remote_branches.push(r.trim_start_matches("refs/remotes/"));
+                    remote_branches.push(format!("🌐 {}", r.trim_start_matches("refs/remotes/")));
                     has_remote_branch = true;
                 } else {
-                    other_refs.push(r.trim_start_matches("refs/"));
+                    other_refs.push(format!("📍 {}", r.trim_start_matches("refs/")));
                     has_other_refs = true;
                 }
             }
@@ -169,7 +169,7 @@ impl CommitNode {
             let tags_str = self
                 .tags
                 .iter()
-                .map(|t| t.trim_start_matches("refs/tags/"))
+                .map(|t| format!("🏷️ {}", t.trim_start_matches("refs/tags/")))
                 .collect::<Vec<_>>()
                 .join(", ");
             label_parts.push(format!("({})", tags_str));
@@ -177,24 +177,37 @@ impl CommitNode {
 
         // Set color based on priority: local > other refs > remote > tags
         if has_local_branch {
-            color = "lightblue"; // Local branches - light blue
+            color = "\"#e3f2fd\""; // Local branches - light blue gradient
         } else if has_other_refs {
-            color = "lightyellow"; // Other refs (HEAD, ROOT) - light yellow
+            color = "\"#fff3e0\""; // Other refs (HEAD, ROOT) - light orange
         } else if has_remote_branch {
-            color = "lightgreen"; // Remote branches - light green
+            color = "\"#e8f5e8\""; // Remote branches - light green
         } else if !self.tags.is_empty() {
-            color = "lightcoral"; // Tags - light coral/pink (only if no branches)
+            color = "\"#fce4ec\""; // Tags - light pink
         }
 
         let mut label = label_parts.join(" ");
 
         if self.is_tip {
-            label = format!("{} {{TIP}}", label);
+            label = format!("{} ⭐", label);
         }
 
+        // Choose shape based on reference type
+        let shape = if has_local_branch {
+            "ellipse"
+        } else if has_remote_branch {
+            "diamond"
+        } else if has_other_refs {
+            "house"
+        } else if !self.tags.is_empty() {
+            "octagon"
+        } else {
+            "circle"
+        };
+
         format!(
-            "\"{}\" [label=\"{}\", shape=box, style=filled, color=black, fillcolor={}]",
-            self.id, label, color
+            "\"{}\" [label=\"{}\", shape={}, style=\"filled,bold\", color=\"#2c3e50\", fillcolor={}, fontname=\"Arial\", fontsize=8, fontcolor=\"#2c3e50\", penwidth=1, width=0.8, height=0.5]",
+            self.id, label, shape, color
         )
     }
 }
@@ -304,10 +317,16 @@ impl GitGraphviz {
         // Find junction commits and trace connections between referenced commits
         let condensed_graph = self.build_condensed_graph(&referenced_commits)?;
 
-        // Write DOT file
+        // Write DOT file with enhanced styling
         writeln!(writer, "digraph git {{")?;
-        writeln!(writer, "  rankdir=TB;")?;
-        writeln!(writer, "  node [fontsize=10];")?;
+        writeln!(writer, "  rankdir=BT;")?; // Bottom to Top (flipped)
+        writeln!(writer, "  bgcolor=\"#f8f9fa\";")?;
+        writeln!(writer, "  node [fontname=\"Arial Bold\", fontsize=10];")?;
+        writeln!(
+            writer,
+            "  edge [color=\"#495057\", penwidth=2, arrowsize=0.8, arrowhead=vee];"
+        )?;
+        writeln!(writer, "  graph [splines=ortho, nodesep=0.3, ranksep=0.4];")?;
 
         // Write all commit nodes (now condensed)
         for commit in condensed_graph.values() {
