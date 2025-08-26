@@ -87,7 +87,7 @@ impl CommitNode {
         let _short_id = format!("{:.7}", id);
         let message = commit.message().unwrap_or("").to_string();
         let timestamp = commit.time().seconds();
-        
+
         let parents: Vec<String> = commit.parent_ids().map(|oid| oid.to_string()).collect();
 
         Self {
@@ -318,24 +318,25 @@ impl GitGraphviz {
     ) -> Result<()> {
         let mut to_visit = Vec::new();
         let mut visited = std::collections::HashSet::new();
-        
+
         to_visit.push((start_oid, 0));
-        
+
         while let Some((oid, depth)) = to_visit.pop() {
             if depth >= max_depth || visited.contains(&oid) {
                 continue;
             }
-            
+
             visited.insert(oid);
-            
+
             // Add this commit
             let oid_str = oid.to_string();
-            if let std::collections::hash_map::Entry::Vacant(e) = all_commits.entry(oid_str.clone()) {
+            if let std::collections::hash_map::Entry::Vacant(e) = all_commits.entry(oid_str.clone())
+            {
                 let commit = self.repo.find_commit(oid)?;
                 let commit_node = CommitNode::new(&commit);
                 e.insert(commit_node);
             }
-            
+
             // Add parents to visit list
             if let Ok(commit) = self.repo.find_commit(oid) {
                 for parent_id in commit.parent_ids() {
@@ -343,7 +344,7 @@ impl GitGraphviz {
                 }
             }
         }
-        
+
         Ok(())
     }
 
