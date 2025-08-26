@@ -1,0 +1,14 @@
+digraph git {
+  rankdir=TB;
+  node [fontsize=10];
+  subgraph cluster_refs_heads_master {
+    label="refs/heads/master";
+    color=blue; style=dotted;
+    "f172e00d7bec33d4de93a424fecbe3d4659257cd"
+  }
+  "2fb030b5bfbc7bae6b55347cb849ffc067a54c3e" [label="Fix connected graph visualization for branches", shape=box, style=filled, color=black, fillcolor=white]
+  "f172e00d7bec33d4de93a424fecbe3d4659257cd" [label="next try {TIP}", shape=box, style=filled, color=black, fillcolor=white]
+  "97dd6a867dd3e46492fb744306d82b45f49f07b4" [label="Initial commit: Git Graph Visualizer (ggv)", shape=box, style=filled, color=black, fillcolor=white]
+  "97dd6a867dd3e46492fb744306d82b45f49f07b4" -> "2fb030b5bfbc7bae6b55347cb849ffc067a54c3e"
+  "2fb030b5bfbc7bae6b55347cb849ffc067a54c3e" -> "f172e00d7bec33d4de93a424fecbe3d4659257cd"
+}

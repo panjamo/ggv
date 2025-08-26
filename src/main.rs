@@ -22,7 +22,7 @@ struct Args {
     )]
     output: String,
 
-    #[arg(long, help = "Skip PNG generation and opening", action = clap::ArgAction::SetTrue)]
+    #[arg(long, help = "Skip SVG generation and opening", action = clap::ArgAction::SetTrue)]
     no_show: bool,
 
     #[arg(
@@ -402,15 +402,15 @@ impl GitGraphviz {
     }
 }
 
-fn generate_png(dot_path: &str) -> Result<String> {
+fn generate_svg(dot_path: &str) -> Result<String> {
     let dot_file = Path::new(dot_path);
-    let png_path = dot_file.with_extension("png");
+    let svg_path = dot_file.with_extension("svg");
 
     let output = Command::new("dot")
-        .arg("-Tpng")
+        .arg("-Tsvg")
         .arg(dot_path)
         .arg("-o")
-        .arg(&png_path)
+        .arg(&svg_path)
         .output()
         .with_context(|| {
             "Failed to execute dot.exe. Make sure Graphviz is installed and dot.exe is in PATH"
@@ -421,9 +421,9 @@ fn generate_png(dot_path: &str) -> Result<String> {
         return Err(anyhow::anyhow!("dot.exe failed: {}", error_msg));
     }
 
-    let png_path_str = png_path.to_string_lossy().to_string();
-    println!("Generated PNG file: {}", png_path_str);
-    Ok(png_path_str)
+    let svg_path_str = svg_path.to_string_lossy().to_string();
+    println!("Generated SVG file: {}", svg_path_str);
+    Ok(svg_path_str)
 }
 
 fn open_file(file_path: &str) -> Result<()> {
@@ -463,8 +463,8 @@ fn main() -> Result<()> {
     git_viz.generate_dot(&args.output)?;
 
     if !args.no_show {
-        let png_path = generate_png(&args.output)?;
-        open_file(&png_path)?;
+        let svg_path = generate_svg(&args.output)?;
+        open_file(&svg_path)?;
     }
 
     Ok(())
