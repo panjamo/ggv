@@ -22,8 +22,52 @@ struct Args {
     )]
     output: String,
 
-    #[arg(short, long, help = "Generate PNG and open it", default_value = "true")]
-    show: bool,
+    #[arg(long, help = "Skip PNG generation and opening", action = clap::ArgAction::SetTrue)]
+    no_show: bool,
+
+    #[arg(
+        short,
+        long,
+        help = "Filter git refs by type (b=branches, r=remotes, t=tags, h=head)",
+        default_value = "brt"
+    )]
+    filter: String,
+}
+
+#[derive(Debug, Clone)]
+struct RefFilter {
+    branches: bool,
+    remotes: bool,
+    tags: bool,
+    head: bool,
+}
+
+impl RefFilter {
+    fn from_string(filter_str: &str) -> Self {
+        let filter_chars: std::collections::HashSet<char> = filter_str.chars().collect();
+        Self {
+            branches: filter_chars.contains(&'b'),
+            remotes: filter_chars.contains(&'r'),
+            tags: filter_chars.contains(&'t'),
+            head: filter_chars.contains(&'h'),
+        }
+    }
+
+    fn should_include_branches(&self) -> bool {
+        self.branches
+    }
+
+    fn should_include_remotes(&self) -> bool {
+        self.remotes
+    }
+
+    fn should_include_tags(&self) -> bool {
+        self.tags
+    }
+
+    fn should_include_head(&self) -> bool {
+        self.head
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -32,9 +76,9 @@ struct CommitNode {
     _short_id: String,
     message: String,
     timestamp: i64,
-    parents: Vec<String>,
     tags: BTreeSet<String>,
     is_tip: bool,
+    parents: Vec<String>,
 }
 
 impl CommitNode {
@@ -43,16 +87,17 @@ impl CommitNode {
         let _short_id = format!("{:.7}", id);
         let message = commit.message().unwrap_or("").to_string();
         let timestamp = commit.time().seconds();
-        let parents = commit.parent_ids().map(|oid| oid.to_string()).collect();
+        
+        let parents: Vec<String> = commit.parent_ids().map(|oid| oid.to_string()).collect();
 
         Self {
             id,
             _short_id,
             message,
             timestamp,
-            parents,
             tags: BTreeSet::new(),
             is_tip: false,
+            parents,
         }
     }
 
@@ -122,10 +167,11 @@ impl Ord for CommitNode {
 struct GitGraphviz {
     repo: Repository,
     special_branches: Vec<String>,
+    filter: RefFilter,
 }
 
 impl GitGraphviz {
-    fn new(repo_path: &str) -> Result<Self> {
+    fn new(repo_path: &str, filter: RefFilter) -> Result<Self> {
         let repo = Repository::open(repo_path)
             .with_context(|| format!("Failed to open repository at: {}", repo_path))?;
 
@@ -138,6 +184,7 @@ impl GitGraphviz {
         Ok(Self {
             repo,
             special_branches,
+            filter,
         })
     }
 
@@ -149,23 +196,56 @@ impl GitGraphviz {
         let mut all_commits: HashMap<String, CommitNode> = HashMap::new();
         let mut branch_tips: HashMap<String, String> = HashMap::new();
 
-        // Walk all branches
-        let branches = self.repo.branches(Some(BranchType::Local))?;
-        for branch_result in branches {
-            let (branch, _) = branch_result?;
-            let branch_name = branch.name()?.unwrap_or("unknown").to_string();
-            let ref_name = format!("refs/heads/{}", branch_name);
+        // Walk local branches if enabled
+        if self.filter.should_include_branches() {
+            let branches = self.repo.branches(Some(BranchType::Local))?;
+            for branch_result in branches {
+                let (branch, _) = branch_result?;
+                let branch_name = branch.name()?.unwrap_or("unknown").to_string();
+                let ref_name = format!("refs/heads/{}", branch_name);
 
-            if let Some(oid) = branch.get().target() {
-                let tip_commit = self.walk_branch(&mut all_commits, oid)?;
-                if let Some(tip_id) = tip_commit {
-                    branch_tips.insert(ref_name, tip_id);
+                if let Some(oid) = branch.get().target() {
+                    // Walk commit history from this branch tip
+                    self.add_commit_history(&mut all_commits, oid, 10)?;
+                    let commit_id = oid.to_string();
+                    branch_tips.insert(ref_name, commit_id);
                 }
             }
         }
 
-        // Add tags to commits
-        self.add_tags_to_commits(&mut all_commits)?;
+        // Walk remote branches if enabled
+        if self.filter.should_include_remotes() {
+            let remote_branches = self.repo.branches(Some(BranchType::Remote))?;
+            for branch_result in remote_branches {
+                let (branch, _) = branch_result?;
+                let branch_name = branch.name()?.unwrap_or("unknown").to_string();
+                let ref_name = format!("refs/remotes/{}", branch_name);
+
+                if let Some(oid) = branch.get().target() {
+                    // Walk commit history from this branch tip
+                    self.add_commit_history(&mut all_commits, oid, 10)?;
+                    let commit_id = oid.to_string();
+                    branch_tips.insert(ref_name, commit_id);
+                }
+            }
+        }
+
+        // Add HEAD if enabled
+        if self.filter.should_include_head() {
+            if let Ok(head) = self.repo.head() {
+                if let Some(oid) = head.target() {
+                    // Walk commit history from HEAD
+                    self.add_commit_history(&mut all_commits, oid, 10)?;
+                    let commit_id = oid.to_string();
+                    branch_tips.insert("HEAD".to_string(), commit_id);
+                }
+            }
+        }
+
+        // Add tagged commits if enabled
+        if self.filter.should_include_tags() {
+            self.add_tagged_commits(&mut all_commits)?;
+        }
 
         // Mark tips
         for tip_id in branch_tips.values() {
@@ -198,14 +278,12 @@ impl GitGraphviz {
             writeln!(writer, "  {}", commit.get_dot_node())?;
         }
 
-        // Write edges
+        // Write edges between commits and their parents (only if both commits are in our set)
         for commit in all_commits.values() {
             for parent_id in &commit.parents {
-                writeln!(
-                    writer,
-                    "  \"{}\" -> \"{}\" [dir=back];",
-                    commit.id, parent_id
-                )?;
+                if all_commits.contains_key(parent_id) {
+                    writeln!(writer, "  \"{}\" -> \"{}\"", parent_id, commit.id)?;
+                }
             }
         }
 
@@ -216,38 +294,63 @@ impl GitGraphviz {
         Ok(())
     }
 
-    fn walk_branch(
+    fn add_ref_commit(
+        &self,
+        all_commits: &mut HashMap<String, CommitNode>,
+        oid: Oid,
+    ) -> Result<String> {
+        let oid_str = oid.to_string();
+
+        if let std::collections::hash_map::Entry::Vacant(e) = all_commits.entry(oid_str.clone()) {
+            let commit = self.repo.find_commit(oid)?;
+            let commit_node = CommitNode::new(&commit);
+            e.insert(commit_node);
+        }
+
+        Ok(oid_str)
+    }
+
+    fn add_commit_history(
         &self,
         all_commits: &mut HashMap<String, CommitNode>,
         start_oid: Oid,
-    ) -> Result<Option<String>> {
-        let mut revwalk = self.repo.revwalk()?;
-        revwalk.push(start_oid)?;
-        revwalk.set_sorting(git2::Sort::TOPOLOGICAL)?;
-
-        let mut tip_id = None;
-        let mut first = true;
-
-        for oid_result in revwalk {
-            let oid = oid_result?;
-            let oid_str = oid.to_string();
-
-            if first {
-                tip_id = Some(oid_str.clone());
-                first = false;
+        max_depth: usize,
+    ) -> Result<()> {
+        let mut to_visit = Vec::new();
+        let mut visited = std::collections::HashSet::new();
+        
+        to_visit.push((start_oid, 0));
+        
+        while let Some((oid, depth)) = to_visit.pop() {
+            if depth >= max_depth || visited.contains(&oid) {
+                continue;
             }
-
-            if let std::collections::hash_map::Entry::Vacant(e) = all_commits.entry(oid_str) {
+            
+            visited.insert(oid);
+            
+            // Add this commit
+            let oid_str = oid.to_string();
+            if let std::collections::hash_map::Entry::Vacant(e) = all_commits.entry(oid_str.clone()) {
                 let commit = self.repo.find_commit(oid)?;
                 let commit_node = CommitNode::new(&commit);
                 e.insert(commit_node);
             }
+            
+            // Add parents to visit list
+            if let Ok(commit) = self.repo.find_commit(oid) {
+                for parent_id in commit.parent_ids() {
+                    to_visit.push((parent_id, depth + 1));
+                }
+            }
         }
-
-        Ok(tip_id)
+        
+        Ok(())
     }
 
-    fn add_tags_to_commits(&self, all_commits: &mut HashMap<String, CommitNode>) -> Result<()> {
+    fn add_tagged_commits(&self, all_commits: &mut HashMap<String, CommitNode>) -> Result<()> {
+        // Collect tag info first, then add commits
+        let mut tag_commits = Vec::new();
+
         self.repo.tag_foreach(|oid, name| {
             let tag_name = String::from_utf8_lossy(name).to_string();
 
@@ -260,14 +363,19 @@ impl GitGraphviz {
                 };
 
                 if let Some(commit_oid) = commit_oid {
-                    let commit_id = commit_oid.to_string();
-                    if let Some(commit_node) = all_commits.get_mut(&commit_id) {
-                        commit_node.add_tag(tag_name);
-                    }
+                    tag_commits.push((commit_oid, tag_name));
                 }
             }
             true
         })?;
+
+        // Now add the commits and tags
+        for (commit_oid, tag_name) in tag_commits {
+            let commit_id = self.add_ref_commit(all_commits, commit_oid)?;
+            if let Some(commit_node) = all_commits.get_mut(&commit_id) {
+                commit_node.add_tag(tag_name);
+            }
+        }
 
         Ok(())
     }
@@ -279,7 +387,7 @@ impl GitGraphviz {
         tip_id: &str,
         _all_commits: &HashMap<String, CommitNode>,
     ) -> Result<()> {
-        let cluster_name = branch_name.replace('/', "_");
+        let cluster_name = branch_name.replace(['/', '.', '-'], "_");
         writeln!(writer, "  subgraph cluster_{} {{", cluster_name)?;
         writeln!(writer, "    label=\"{}\";", branch_name)?;
         writeln!(writer, "    color=blue; style=dotted;")?;
@@ -349,10 +457,11 @@ fn open_file(file_path: &str) -> Result<()> {
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    let git_viz = GitGraphviz::new(&args.repo_path)?;
+    let filter = RefFilter::from_string(&args.filter);
+    let git_viz = GitGraphviz::new(&args.repo_path, filter)?;
     git_viz.generate_dot(&args.output)?;
 
-    if args.show {
+    if !args.no_show {
         let png_path = generate_png(&args.output)?;
         open_file(&png_path)?;
     }
