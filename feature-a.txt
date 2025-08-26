@@ -1,0 +1,13 @@
+This is a test file for feature-a branch.
+
+This file will help demonstrate the condensed graph functionality
+by creating a branch that diverges from master.
+
+The condensed graph should show:
+- Referenced commits (branch tips, tags)
+- Junction commits (merge points) if any
+- Connections between important commits
+- But NOT every single commit in the history
+
+This helps keep the visualization clean and focused on the
+important structural elements of the repository.
