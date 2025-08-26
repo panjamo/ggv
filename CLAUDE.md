@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-GGV (Git Graph Visualizer) is a Rust CLI tool that generates Graphviz DOT files from Git repositories and optionally converts them to PNG images for visualization. The tool analyzes Git commit history, branches, and tags to create visual representations of the repository structure.
+GGV (Git Graph Visualizer) is a Rust CLI tool that generates Graphviz DOT files from Git repositories and optionally converts them to SVG images for visualization. The tool analyzes Git commit history, branches, and tags to create visual representations of the repository structure.
 
 ## Development Commands
 
 ### Build and Run
 - `cargo build` - Build the project
-- `cargo run` - Run with default options (generates DOT file and PNG, opens PNG)
+- `cargo run` - Run with default options (generates DOT file and SVG, opens SVG)
 - `cargo run -- --help` - Show CLI help
 - `cargo run -- --repo-path /path/to/repo --output custom.dot --no-show` - Run with custom options
 
@@ -31,7 +31,7 @@ Always run the complete quality check sequence:
 
 **Args Struct (`main.rs:13-27`)**
 - CLI argument parsing using clap with derive macros
-- Key options: `repo_path`, `output` (DOT file), `show` (PNG generation, defaults to true)
+- Key options: `repo_path`, `output` (DOT file), `show` (SVG generation, defaults to true)
 
 **CommitNode (`main.rs:29-115`)**
 - Represents a Git commit with metadata (ID, message, timestamp, parents, tags)
@@ -46,7 +46,7 @@ Always run the complete quality check sequence:
 - `write_subgraph()` - Creates Graphviz subgraphs for branch visualization
 
 **Utility Functions (`main.rs:301-350`)**
-- `generate_png()` - Executes `dot.exe` to convert DOT files to PNG format
+- `generate_svg()` - Uses `graphviz-rust` to convert DOT files to SVG format
 - `open_file()` - Cross-platform file opening (Windows: `cmd /C start`, macOS: `open`, Linux: `xdg-open`)
 
 ### Data Flow
@@ -55,17 +55,18 @@ Always run the complete quality check sequence:
 3. Add Git tag associations to commits
 4. Mark branch tip commits for special visualization
 5. Generate DOT file with nodes (commits) and edges (parent relationships)
-6. If `--show` enabled: convert to PNG via Graphviz and open file
+6. If `--show` enabled: convert to SVG via graphviz-rust and open file
 
 ### Dependencies
 - `git2` - Git repository access and commit traversal
 - `clap` with derive features - CLI argument parsing
 - `anyhow` - Error handling with context
 - `chrono` with serde - Date/time handling (imported but not actively used)
+- `graphviz-rust` - Pure Rust Graphviz implementation for DOT parsing and SVG generation
 
 ### External Requirements
-- **Graphviz** must be installed with `dot.exe` in PATH for PNG generation
 - Cross-platform file opening utilities (built into OS)
+- **No external Graphviz installation required** - uses `graphviz-rust` for pure Rust SVG generation
 
 ### Special Branch Handling
 The tool prioritizes certain branches in subgraph generation:

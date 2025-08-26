@@ -1,6 +1,11 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use git2::{BranchType, Oid, Repository};
+use graphviz_rust::{
+    cmd::{CommandArg, Format},
+    exec, parse,
+    printer::PrinterContext,
+};
 use std::collections::{BTreeSet, HashMap};
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -690,20 +695,22 @@ fn generate_svg(dot_path: &str) -> Result<String> {
     let dot_file = Path::new(dot_path);
     let svg_path = dot_file.with_extension("svg");
 
-    let output = Command::new("dot")
-        .arg("-Tsvg")
-        .arg(dot_path)
-        .arg("-o")
-        .arg(&svg_path)
-        .output()
-        .with_context(|| {
-            "Failed to execute dot.exe. Make sure Graphviz is installed and dot.exe is in PATH"
-        })?;
+    // Read the DOT file content
+    let dot_content = std::fs::read_to_string(dot_path)
+        .with_context(|| format!("Failed to read DOT file: {}", dot_path))?;
 
-    if !output.status.success() {
-        let error_msg = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow::anyhow!("dot.exe failed: {}", error_msg));
-    }
+    // Parse the DOT content
+    let graph =
+        parse(&dot_content).map_err(|e| anyhow::anyhow!("Failed to parse DOT content: {}", e))?;
+
+    // Generate SVG using graphviz-rust
+    let mut ctx = PrinterContext::default();
+    let svg_content = exec(graph, &mut ctx, vec![CommandArg::Format(Format::Svg)])
+        .map_err(|e| anyhow::anyhow!("Failed to generate SVG: {}", e))?;
+
+    // Write SVG to file
+    std::fs::write(&svg_path, svg_content)
+        .with_context(|| format!("Failed to write SVG file: {}", svg_path.display()))?;
 
     let svg_path_str = svg_path.to_string_lossy().to_string();
     println!("Generated SVG file: {}", svg_path_str);
