@@ -234,7 +234,7 @@ impl CommitNode {
 
         // Choose shape based on reference type
         let shape = if has_local_branch {
-            "ellipse"
+            "rect"
         } else if has_remote_branch {
             "diamond"
         } else if has_other_refs {
@@ -242,7 +242,7 @@ impl CommitNode {
         } else if !self.tags.is_empty() {
             "octagon"
         } else {
-            "circle"
+            "egg"
         };
 
         format!(
