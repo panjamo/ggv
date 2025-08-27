@@ -6,7 +6,7 @@ use graphviz_rust::{
     exec, parse,
     printer::PrinterContext,
 };
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -142,16 +142,21 @@ impl CommitNode {
 
         // Add all reference names (branches, remotes, HEAD) with color coding
         if !self.refs.is_empty() {
-            let mut local_branches = Vec::new();
-            let mut remote_branches = Vec::new();
+            let mut local_branches = HashSet::new();
+            let mut remote_branches = HashMap::new();
             let mut other_refs = Vec::new();
 
+            // Collect local branches, remote branches, and other refs
             for r in &self.refs {
                 if r.starts_with("refs/heads/") {
-                    local_branches.push(format!("🌿 {}", r.trim_start_matches("refs/heads/")));
+                    let branch_name = r.trim_start_matches("refs/heads/");
+                    local_branches.insert(branch_name.to_string());
                     has_local_branch = true;
                 } else if r.starts_with("refs/remotes/") {
-                    remote_branches.push(format!("🌐 {}", r.trim_start_matches("refs/remotes/")));
+                    let remote_ref = r.trim_start_matches("refs/remotes/");
+                    if let Some((remote, branch)) = remote_ref.split_once('/') {
+                        remote_branches.insert(branch.to_string(), remote.to_string());
+                    }
                     has_remote_branch = true;
                 } else {
                     other_refs.push(format!("📍 {}", r.trim_start_matches("refs/")));
@@ -160,18 +165,37 @@ impl CommitNode {
             }
 
             let mut ref_parts = Vec::new();
-            if !local_branches.is_empty() {
-                ref_parts.push(local_branches.join(", "));
+            let mut processed_branches = HashSet::new();
+
+            // Process matching local/remote pairs first (abbreviated)
+            for local_branch in &local_branches {
+                if let Some(remote_name) = remote_branches.get(local_branch) {
+                    ref_parts.push(format!("🌿🌐 {} ({})", local_branch, remote_name));
+                    processed_branches.insert(local_branch.clone());
+                }
             }
-            if !remote_branches.is_empty() {
-                ref_parts.push(remote_branches.join(", "));
+
+            // Add remaining local branches (no remote counterpart)
+            for local_branch in &local_branches {
+                if !processed_branches.contains(local_branch) {
+                    ref_parts.push(format!("🌿 {}", local_branch));
+                }
             }
+
+            // Add remaining remote branches (no local counterpart)
+            for (branch, remote) in &remote_branches {
+                if !local_branches.contains(branch) {
+                    ref_parts.push(format!("🌐 {}/{}", remote, branch));
+                }
+            }
+
+            // Add other refs
             if !other_refs.is_empty() {
-                ref_parts.push(other_refs.join(", "));
+                ref_parts.extend(other_refs);
             }
 
             if !ref_parts.is_empty() {
-                label_parts.push(ref_parts.join(", "));
+                label_parts.push(ref_parts.join("\\n"));
             }
         }
 
@@ -182,7 +206,7 @@ impl CommitNode {
                 .iter()
                 .map(|t| format!("🏷️ {}", t.trim_start_matches("refs/tags/")))
                 .collect::<Vec<_>>()
-                .join(", ");
+                .join("\\n");
             label_parts.push(tags_str);
         }
 
@@ -197,7 +221,7 @@ impl CommitNode {
             color = "\"#fce4ec\""; // Tags - light pink
         }
 
-        let mut label = label_parts.join(" ");
+        let mut label = label_parts.join("\\n");
 
         if self.is_tip {
             label = format!("{} ⭐", label);
