@@ -234,9 +234,9 @@ impl CommitNode {
 
         // Choose shape based on reference type
         let shape = if has_local_branch {
-            "rect"
+            "box"
         } else if has_remote_branch {
-            "diamond"
+            "box"
         } else if has_other_refs {
             "house"
         } else if !self.tags.is_empty() {
@@ -246,7 +246,7 @@ impl CommitNode {
         };
 
         format!(
-            "\"{}\" [label=\"{}\", shape={}, style=\"filled,bold\", color=\"#2c3e50\", fillcolor={}, fontname=\"Arial\", fontsize=8, fontcolor=\"#2c3e50\", penwidth=1, width=0.8, height=0.5]",
+            "\"{}\" [label=\"{}\", shape={}, style=\"rounded,filled,bold\", color=\"#2c3e50\", fillcolor={}, fontname=\"Arial\", fontsize=8, fontcolor=\"#2c3e50\", penwidth=0, width=0.8, height=0.5]",
             self.id, label, shape, color
         )
     }
