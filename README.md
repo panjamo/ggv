@@ -2,9 +2,8 @@
 
 A Rust CLI tool that generates visual representations of Git repository structure using Graphviz DOT format and SVG output.
 
-![Sample Git Graph](doc/sample.png)
-
-
+<img src="doc/icon.png" alt="GGV Icon" width="128" height="128">
+ 
 ## Features
 
 - **Comprehensive Visualization**: Displays commits, branches, tags, and their relationships
@@ -19,6 +18,8 @@ A Rust CLI tool that generates visual representations of Git repository structur
   - **Windows**: Download from [graphviz.org](https://graphviz.org/download/) or use `choco install graphviz`
   - **macOS**: `brew install graphviz`
   - **Linux**: `sudo apt install graphviz` (Debian/Ubuntu) or equivalent
+
+![Sample Git Graph](doc/sample.png)
 
 ## Installation
 
