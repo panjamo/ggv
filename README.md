@@ -7,11 +7,18 @@ A Rust CLI tool that generates visual representations of Git repository structur
 
 ## Features
 
-- **Pure Rust Implementation**: No external Graphviz installation required
 - **Comprehensive Visualization**: Displays commits, branches, tags, and their relationships
 - **SVG Output**: Generates high-quality SVG images for easy viewing and sharing
 - **Configurable**: Flexible CLI options for custom workflows
 - **Cross-Platform**: Works on Windows, macOS, and Linux
+
+## Prerequisites
+
+- Rust toolchain (1.70+)
+- **Graphviz**: Must be installed on your system
+  - **Windows**: Download from [graphviz.org](https://graphviz.org/download/) or use `choco install graphviz`
+  - **macOS**: `brew install graphviz`
+  - **Linux**: `sudo apt install graphviz` (Debian/Ubuntu) or equivalent
 
 ## Installation
 
@@ -86,11 +93,6 @@ The tool generates:
 - **Branch Tips**: Specially marked to identify branch heads
 
 ## Development
-
-### Prerequisites
-
-- Rust toolchain (1.70+)
-- Git repository to visualize
 
 ### Build Commands
 
