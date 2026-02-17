@@ -86,6 +86,7 @@ struct CommitNode {
     is_tip: bool,
     _parents: Vec<String>,
     branch_readme: Option<String>,
+    is_current_checkout: bool,
 }
 
 impl CommitNode {
@@ -107,6 +108,7 @@ impl CommitNode {
             is_tip: false,
             _parents,
             branch_readme: None,
+            is_current_checkout: false,
         }
     }
 
@@ -126,6 +128,10 @@ impl CommitNode {
         self.is_tip = is_tip;
     }
 
+    fn set_current_checkout(&mut self, is_current: bool) {
+        self.is_current_checkout = is_current;
+    }
+
     fn get_dot_node(&self) -> String {
         let mut label_parts = Vec::new();
         let mut color = "white"; // Default color
@@ -135,7 +141,7 @@ impl CommitNode {
             label_parts.push(self._short_id.clone());
         }
 
-        // Determine color priority: local branches > remote branches > other refs > tags
+        // Determine color priority: current checkout > local branches > remote branches > other refs > tags
         let mut has_local_branch = false;
         let mut has_remote_branch = false;
         let mut has_other_refs = false;
@@ -210,8 +216,10 @@ impl CommitNode {
             label_parts.push(tags_str);
         }
 
-        // Set color based on priority: local > other refs > remote > tags
-        if has_local_branch {
+        // Set color based on priority: current checkout > local > other refs > remote > tags
+        if self.is_current_checkout {
+            color = "\"#fff9c4\""; // Current checkout - bright yellow
+        } else if has_local_branch {
             color = "\"#e3f2fd\""; // Local branches - light blue gradient
         } else if has_other_refs {
             color = "\"#fff3e0\""; // Other refs (HEAD, ROOT) - light orange
@@ -222,6 +230,10 @@ impl CommitNode {
         }
 
         let mut label = label_parts.join("\\n");
+
+        if self.is_current_checkout {
+            label = format!("➤ {}", label);
+        }
 
         if self.is_tip {
             label = format!("{} ⭐", label);
@@ -245,9 +257,16 @@ impl CommitNode {
             "egg"
         };
 
+        let penwidth = if self.is_current_checkout { 3 } else { 0 };
+        let border_color = if self.is_current_checkout {
+            "\"#f57f17\""
+        } else {
+            "\"#2c3e50\""
+        };
+
         format!(
-            "\"{}\" [label=\"{}\", shape={}, style=\"rounded,filled,bold\", color=\"#2c3e50\", fillcolor={}, fontname=\"Arial\", fontsize=8, fontcolor=\"#2c3e50\", penwidth=0, width=0.8, height=0.5]",
-            self.id, label, shape, color
+            "\"{}\" [label=\"{}\", shape={}, style=\"rounded,filled,bold\", color={}, fillcolor={}, fontname=\"Arial\", fontsize=8, fontcolor=\"#2c3e50\", penwidth={}, width=0.8, height=0.5]",
+            self.id, label, shape, border_color, color, penwidth
         )
     }
 }
@@ -328,10 +347,15 @@ impl GitGraphviz {
             }
         }
 
-        if self.filter.should_include_head() {
-            if let Ok(head) = self.repo.head() {
-                if let Some(oid) = head.target() {
-                    let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
+        // Always track the current checkout (HEAD) for highlighting purposes
+        let mut current_checkout_id: Option<String> = None;
+        if let Ok(head) = self.repo.head() {
+            if let Some(oid) = head.target() {
+                let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
+                current_checkout_id = Some(commit_id.clone());
+                
+                // Only add HEAD as a visible ref if filter includes it
+                if self.filter.should_include_head() {
                     if let Some(commit_node) = referenced_commits.get_mut(&commit_id) {
                         commit_node.add_ref("HEAD".to_string());
                     }
@@ -354,6 +378,13 @@ impl GitGraphviz {
         for tip_id in branch_tips.values() {
             if let Some(commit) = referenced_commits.get_mut(tip_id) {
                 commit.set_tip(true);
+            }
+        }
+
+        // Mark current checkout
+        if let Some(checkout_id) = current_checkout_id {
+            if let Some(commit) = referenced_commits.get_mut(&checkout_id) {
+                commit.set_current_checkout(true);
             }
         }
 
