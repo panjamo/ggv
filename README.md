@@ -8,7 +8,7 @@ A Rust CLI tool that generates visual representations of Git repository structur
 
 - **Comprehensive Visualization**: Displays commits, branches, remote branches, tags, and HEAD
 - **Condensed Graph**: Only referenced commits (branch tips, tags, root, merge junctions) are shown — intermediate commits are skipped for clarity
-- **Dark Developer Theme**: Branch nodes are color-coded by type (main, develop, feature/\*, release/\*, hotfix/\*) on a dark slate background
+- **Dual Theme**: Dark (default) and light theme — branch nodes are color-coded by type (main, develop, feature/\*, release/\*, hotfix/\*); switch with `--theme light`
 - **Auto Fetch**: Runs `git fetch --tags` before generating the graph to ensure tags are current
 - **SVG Output**: Generates high-quality SVG images opened automatically in your default viewer
 - **Ref Filtering**: Choose which ref types to include (local branches, remotes, tags, HEAD)
@@ -78,6 +78,7 @@ Options:
                                (accepts commit hash, branch name, or tag)
       --no-fetch               Skip automatic 'git fetch --tags' before generating the graph
       --keep-dot               Keep the intermediate DOT file after SVG generation
+      --theme <THEME>          Color theme: dark (default) or light [default: dark]
   -h, --help                   Print help
   -V, --version                Print version
 ```
@@ -151,6 +152,12 @@ Combine with filtering — show only local branches descending from a tag:
 ggv --from v1.0.0 --filter b
 ```
 
+Use the light theme (GitHub Light / Linear style):
+
+```bash
+ggv --theme light
+```
+
 ## Output
 
 1. **SVG file** (`ggv-<repo-name>.svg`): Visual graph opened automatically in your default viewer.
@@ -159,23 +166,38 @@ ggv --from v1.0.0 --filter b
 
 ### Graph Elements
 
-Branch nodes are color-coded by name on a dark slate background (`#0F172A`):
+Branch nodes are rounded rectangles, color-coded by name. Two built-in themes are available:
 
-| Branch pattern | Fill | Border |
-|----------------|------|--------|
-| `main` / `master` | `#059669` green | `#34D399` |
-| `develop` | `#7C3AED` violet | `#A78BFA` |
-| `feature/*` | `#2563EB` blue | `#60A5FA` |
-| `release/*` | `#D97706` orange | `#FBBF24` |
-| `hotfix/*` | `#DC2626` red | `#F87171` |
-| other branches | `#334155` slate | `#60A5FA` |
+#### Dark theme (`--theme dark`, default) — background `#0F172A`
 
-| Element | Style |
-|---------|-------|
-| Branch node | Rounded rectangle |
-| Tag node | Dashed border, transparent fill, muted text |
-| Current checkout | 2px border + `CURRENT` label |
-| Plain commit / junction | Subtle dark panel |
+| Branch pattern | Fill | Border | Text |
+|----------------|------|--------|------|
+| `main` / `master` | `#059669` | `#34D399` | `#F0FDF4` |
+| `develop` | `#7C3AED` | `#A78BFA` | `#F5F3FF` |
+| `feature/*` | `#2563EB` | `#60A5FA` | `#EFF6FF` |
+| `release/*` | `#D97706` | `#FBBF24` | `#FFFBEB` |
+| `hotfix/*` | `#DC2626` | `#F87171` | `#FEF2F2` |
+| other | `#334155` | `#60A5FA` | `#E2E8F0` |
+
+#### Light theme (`--theme light`) — background `#F8FAFC`
+
+| Branch pattern | Fill | Border | Text |
+|----------------|------|--------|------|
+| `main` / `master` | `#ECFDF5` | `#10B981` | `#065F46` |
+| `develop` | `#F3E8FF` | `#8B5CF6` | `#5B21B6` |
+| `feature/*` | `#EFF6FF` | `#3B82F6` | `#1E40AF` |
+| `release/*` | `#FFF7ED` | `#F59E0B` | `#92400E` |
+| `hotfix/*` | `#FEF2F2` | `#EF4444` | `#7F1D1D` |
+| other | `#F8FAFC` | `#64748B` | `#334155` |
+
+#### Common elements
+
+| Element | Dark | Light |
+|---------|------|-------|
+| Tag node | Dashed `#94A3B8` border, 1px | Dashed `#94A3B8` border, 1.5px, transparent fill |
+| Current checkout | 2px border + `CURRENT` label | 2px border + `CURRENT` label |
+| Plain commit / junction | Dark slate panel | White panel, `#E2E8F0` border |
+| Edges | `#475569` | `#CBD5E1` |
 
 Nodes with both a local branch and a matching remote branch are shown combined (`branch [remote]`).
 Hover tooltips show the commits condensed into each graph edge.

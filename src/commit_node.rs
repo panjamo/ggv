@@ -1,5 +1,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+use crate::theme::Theme;
+
 pub struct PredecessorInfo {
     pub parent_id: String,
     pub url: Option<String>,
@@ -25,52 +27,7 @@ struct NodeColors {
     border: &'static str,
     font: &'static str,
     dashed: bool,
-}
-
-fn branch_style(branch_name: &str) -> NodeColors {
-    if branch_name == "main" || branch_name == "master" {
-        NodeColors {
-            fill: "#059669",
-            border: "#34D399",
-            font: "#F0FDF4",
-            dashed: false,
-        }
-    } else if branch_name == "develop" {
-        NodeColors {
-            fill: "#7C3AED",
-            border: "#A78BFA",
-            font: "#F5F3FF",
-            dashed: false,
-        }
-    } else if branch_name.starts_with("feature/") {
-        NodeColors {
-            fill: "#2563EB",
-            border: "#60A5FA",
-            font: "#EFF6FF",
-            dashed: false,
-        }
-    } else if branch_name.starts_with("release/") {
-        NodeColors {
-            fill: "#D97706",
-            border: "#FBBF24",
-            font: "#FFFBEB",
-            dashed: false,
-        }
-    } else if branch_name.starts_with("hotfix/") {
-        NodeColors {
-            fill: "#DC2626",
-            border: "#F87171",
-            font: "#FEF2F2",
-            dashed: false,
-        }
-    } else {
-        NodeColors {
-            fill: "#334155",
-            border: "#60A5FA",
-            font: "#E2E8F0",
-            dashed: false,
-        }
-    }
+    base_penwidth: f32,
 }
 
 impl CommitNode {
@@ -115,9 +72,9 @@ impl CommitNode {
         self.is_current_checkout = is_current;
     }
 
-    pub fn get_dot_node(&self, predecessors: &[PredecessorInfo]) -> String {
+    pub fn get_dot_node(&self, predecessors: &[PredecessorInfo], theme: Theme) -> String {
         let (label_parts, colors, has_local_branch, has_remote_branch, has_other_refs) =
-            self.build_label_parts();
+            self.build_label_parts(theme);
 
         let is_plain = self.refs.is_empty() && self.tags.is_empty();
 
@@ -128,6 +85,7 @@ impl CommitNode {
                 &colors,
                 has_local_branch,
                 has_remote_branch,
+                theme,
             )
         } else {
             let pred = predecessors.first();
@@ -144,7 +102,8 @@ impl CommitNode {
     }
 
     /// Compute label text and node colors from refs/tags.
-    fn build_label_parts(&self) -> (Vec<String>, NodeColors, bool, bool, bool) {
+    fn build_label_parts(&self, theme: Theme) -> (Vec<String>, NodeColors, bool, bool, bool) {
+        let tc = theme.colors();
         let mut label_parts = Vec::new();
         let mut has_local_branch = false;
         let mut has_remote_branch = false;
@@ -162,17 +121,19 @@ impl CommitNode {
             }
             let colors = if self.is_current_checkout {
                 NodeColors {
-                    fill: "#334155",
-                    border: "#F8FAFC",
-                    font: "#F8FAFC",
+                    fill: tc.plain_current_fill,
+                    border: tc.plain_current_border,
+                    font: tc.plain_current_font,
                     dashed: false,
+                    base_penwidth: 1.0,
                 }
             } else {
                 NodeColors {
-                    fill: "#1E293B",
-                    border: "#475569",
-                    font: "#94A3B8",
+                    fill: tc.plain_fill,
+                    border: tc.plain_border,
+                    font: tc.plain_font,
                     dashed: false,
+                    base_penwidth: 1.0,
                 }
             };
             return (label_parts, colors, false, false, false);
@@ -243,27 +204,37 @@ impl CommitNode {
         }
 
         let colors = if has_local_branch || has_remote_branch {
-            branch_style(primary_branch.as_deref().unwrap_or(""))
+            let (fill, border, font) = theme.branch_colors(primary_branch.as_deref().unwrap_or(""));
+            NodeColors {
+                fill,
+                border,
+                font,
+                dashed: false,
+                base_penwidth: 1.0,
+            }
         } else if !self.tags.is_empty() {
             NodeColors {
-                fill: "#0F172A",
-                border: "#94A3B8",
-                font: "#CBD5E1",
+                fill: tc.tag_fill,
+                border: tc.tag_border,
+                font: tc.tag_font,
                 dashed: true,
+                base_penwidth: tc.tag_penwidth,
             }
         } else if has_other_refs {
             NodeColors {
-                fill: "#334155",
-                border: "#64748B",
-                font: "#CBD5E1",
+                fill: tc.other_fill,
+                border: tc.other_border,
+                font: tc.other_font,
                 dashed: false,
+                base_penwidth: 1.0,
             }
         } else {
             NodeColors {
-                fill: "#1E293B",
-                border: "#475569",
-                font: "#94A3B8",
+                fill: tc.plain_fill,
+                border: tc.plain_border,
+                font: tc.plain_font,
                 dashed: false,
+                base_penwidth: 1.0,
             }
         };
 
@@ -305,7 +276,11 @@ impl CommitNode {
             "filled"
         };
 
-        let penwidth = if self.is_current_checkout { 2 } else { 1 };
+        let penwidth = if self.is_current_checkout {
+            2.0_f32
+        } else {
+            colors.base_penwidth
+        };
         let font_size: u8 = if colors.dashed { 8 } else { 9 };
 
         let url_attr = url.map_or(String::new(), |u| {
@@ -333,8 +308,14 @@ impl CommitNode {
         colors: &NodeColors,
         has_local_branch: bool,
         has_remote_branch: bool,
+        theme: Theme,
     ) -> String {
-        let penwidth = if self.is_current_checkout { 2 } else { 1 };
+        let tc = theme.colors();
+        let penwidth = if self.is_current_checkout {
+            2_u32
+        } else {
+            colors.base_penwidth as u32
+        };
         let col_count = predecessors.len();
 
         let mut identity = label_parts.join("\n");
@@ -379,9 +360,15 @@ impl CommitNode {
                 format!(" TOOLTIP=\"{}\"", html_escape(t).replace('\n', "&#10;"))
             });
             html.push_str(&format!(
-                "<TD PORT=\"p{}\" BORDER=\"1\" COLOR=\"#334155\" BGCOLOR=\"#1E293B\" ALIGN=\"CENTER\"{}{}>\
-                 <FONT FACE=\"Arial\" POINT-SIZE=\"7\" COLOR=\"#94A3B8\">← {}</FONT></TD>",
-                i, href_attr, tooltip_attr, short
+                "<TD PORT=\"p{}\" BORDER=\"1\" COLOR=\"{}\" BGCOLOR=\"{}\" ALIGN=\"CENTER\"{}{}>\
+                 <FONT FACE=\"Arial\" POINT-SIZE=\"7\" COLOR=\"{}\">← {}</FONT></TD>",
+                i,
+                tc.cell_border_color,
+                tc.cell_bgcolor,
+                href_attr,
+                tooltip_attr,
+                tc.cell_font_color,
+                short
             ));
         }
 

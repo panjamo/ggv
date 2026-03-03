@@ -1,5 +1,7 @@
 use clap::Parser;
 
+use crate::theme::Theme;
+
 #[derive(Parser)]
 #[command(name = "ggv")]
 #[command(about = "Git Graph Visualizer - Generate Graphviz DOT files from Git repositories")]
@@ -50,4 +52,12 @@ pub struct Args {
         action = clap::ArgAction::SetTrue
     )]
     pub keep_dot: bool,
+
+    #[arg(
+        long,
+        help = "Color theme: dark (default) or light",
+        default_value_t = Theme::Dark,
+        value_enum
+    )]
+    pub theme: Theme,
 }

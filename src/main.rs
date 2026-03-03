@@ -3,6 +3,7 @@ mod commit_node;
 mod filter;
 mod graph;
 mod graphviz;
+mod theme;
 mod utils;
 
 use anyhow::{Context, Result};
@@ -52,7 +53,13 @@ fn main() -> Result<()> {
     });
 
     let filter = RefFilter::from_string(&args.filter);
-    let git_viz = GitGraphviz::new(&args.repo_path, filter, args.gitlab_url, args.from)?;
+    let git_viz = GitGraphviz::new(
+        &args.repo_path,
+        filter,
+        args.gitlab_url,
+        args.from,
+        args.theme,
+    )?;
     git_viz.generate_dot(&output)?;
 
     if !args.no_show {

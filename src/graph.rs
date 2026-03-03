@@ -6,6 +6,7 @@ use std::io::{BufWriter, Write};
 
 use crate::commit_node::{CommitNode, PredecessorInfo};
 use crate::filter::RefFilter;
+use crate::theme::Theme;
 use crate::utils::time_ago;
 
 pub struct GitGraphviz {
@@ -13,6 +14,7 @@ pub struct GitGraphviz {
     filter: RefFilter,
     gitlab_base_url: Option<String>,
     ancestor_oid: Option<Oid>,
+    theme: Theme,
 }
 
 impl GitGraphviz {
@@ -21,6 +23,7 @@ impl GitGraphviz {
         filter: RefFilter,
         gitlab_url: Option<String>,
         from_commit: Option<String>,
+        theme: Theme,
     ) -> Result<Self> {
         let repo = Repository::open(repo_path)
             .with_context(|| format!("Failed to open repository at: {}", repo_path))?;
@@ -44,6 +47,7 @@ impl GitGraphviz {
             filter,
             gitlab_base_url,
             ancestor_oid,
+            theme,
         })
     }
 
@@ -246,16 +250,19 @@ impl GitGraphviz {
             commit_parents.insert(commit.id.clone(), valid);
         }
 
+        let tc = self.theme.colors();
         writeln!(writer, "digraph git {{")?;
         writeln!(writer, "  rankdir=BT;")?;
-        writeln!(writer, "  bgcolor=\"#0F172A\";")?;
+        writeln!(writer, "  bgcolor=\"{}\";", tc.bg)?;
         writeln!(
             writer,
-            "  node [fontname=\"Arial\", fontsize=9, fontcolor=\"#E2E8F0\", fillcolor=\"#1E293B\", color=\"#475569\", style=filled];"
+            "  node [fontname=\"Arial\", fontsize=9, fontcolor=\"{}\", fillcolor=\"{}\", color=\"{}\", style=filled];",
+            tc.node_default_font, tc.node_default_fill, tc.node_default_border
         )?;
         writeln!(
             writer,
-            "  edge [color=\"#475569\", penwidth=1.5, arrowsize=0.7, arrowhead=vee];"
+            "  edge [color=\"{}\", penwidth=1.5, arrowsize=0.7, arrowhead=vee];",
+            tc.edge_color
         )?;
         writeln!(
             writer,
@@ -332,7 +339,11 @@ impl GitGraphviz {
                     .collect()
             };
 
-            writeln!(writer, "  {}", commit.get_dot_node(&predecessors))?;
+            writeln!(
+                writer,
+                "  {}",
+                commit.get_dot_node(&predecessors, self.theme)
+            )?;
         }
 
         for (child_id, parents) in &commit_parents {
