@@ -1,11 +1,6 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use git2::{BranchType, Oid, Repository};
-use graphviz_rust::{
-    cmd::{CommandArg, Format},
-    exec, parse,
-    printer::PrinterContext,
-};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -403,7 +398,12 @@ impl GitGraphviz {
                 let when = time_ago(commit.time().seconds());
                 result.push((short_id, message, author, when));
                 if result.len() >= max {
-                    result.push(("...".to_string(), "(truncated)".to_string(), String::new(), String::new()));
+                    result.push((
+                        "...".to_string(),
+                        "(truncated)".to_string(),
+                        String::new(),
+                        String::new(),
+                    ));
                     break;
                 }
                 for parent_id in commit.parent_ids() {
@@ -546,7 +546,9 @@ impl GitGraphviz {
                 Some(
                     path_commits
                         .iter()
-                        .map(|(hash, msg, author, when)| format!("{}: {} ({}, {})", hash, msg, author, when))
+                        .map(|(hash, msg, author, when)| {
+                            format!("{}: {} ({}, {})", hash, msg, author, when)
+                        })
                         .collect::<Vec<_>>()
                         .join("\n"),
                 )
@@ -893,26 +895,108 @@ impl GitGraphviz {
     }
 }
 
+fn find_dot_executable() -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+
+    // Check GRAPHVIZ_DOT environment variable first
+    if let Ok(env_path) = std::env::var("GRAPHVIZ_DOT") {
+        let path = PathBuf::from(&env_path);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    // Windows: search common installation directories
+    #[cfg(target_os = "windows")]
+    {
+        let candidates = [
+            r"C:\Program Files\Graphviz\bin\dot.exe",
+            r"C:\Program Files (x86)\Graphviz\bin\dot.exe",
+            r"C:\Graphviz\bin\dot.exe",
+        ];
+        for candidate in &candidates {
+            let path = PathBuf::from(candidate);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        // Fall back to searching PATH via 'where'
+        if let Ok(output) = Command::new("where").arg("dot").output() {
+            if output.status.success() {
+                if let Ok(s) = std::str::from_utf8(&output.stdout) {
+                    for line in s.lines() {
+                        let path = PathBuf::from(line.trim());
+                        if path.exists() {
+                            return Some(path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // macOS / Linux: use 'which'
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(output) = Command::new("which").arg("dot").output() {
+            if output.status.success() {
+                if let Ok(s) = std::str::from_utf8(&output.stdout) {
+                    if let Some(line) = s.lines().next() {
+                        let path = PathBuf::from(line.trim());
+                        if path.exists() {
+                            return Some(path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 fn generate_svg(dot_path: &str) -> Result<String> {
     let dot_file = Path::new(dot_path);
     let svg_path = dot_file.with_extension("svg");
 
-    // Read the DOT file content
-    let dot_content = std::fs::read_to_string(dot_path)
-        .with_context(|| format!("Failed to read DOT file: {}", dot_path))?;
+    let dot_exe = find_dot_executable().ok_or_else(|| {
+        anyhow::anyhow!(
+            "Graphviz (dot.exe) was not found.\n\
+             \n\
+             To install Graphviz on Windows:\n\
+             \n\
+             Option 1 – winget (Windows Package Manager):\n\
+             \n\
+             winget install --id Graphviz.Graphviz\n\
+             \n\
+             Option 2 – Chocolatey:\n\
+             \n\
+             choco install graphviz\n\
+             \n\
+             Option 3 – Manual download:\n\
+             \n\
+             https://graphviz.org/download/\n\
+             \n\
+             After installation, open a new terminal so the PATH is updated.\n\
+             Alternatively, set the GRAPHVIZ_DOT environment variable to the full\n\
+             path of dot.exe, e.g.:\n\
+             \n\
+             set GRAPHVIZ_DOT=C:\\Program Files\\Graphviz\\bin\\dot.exe"
+        )
+    })?;
 
-    // Parse the DOT content
-    let graph =
-        parse(&dot_content).map_err(|e| anyhow::anyhow!("Failed to parse DOT content: {}", e))?;
+    println!("Using Graphviz: {}", dot_exe.display());
 
-    // Generate SVG using graphviz-rust
-    let mut ctx = PrinterContext::default();
-    let svg_content = exec(graph, &mut ctx, vec![CommandArg::Format(Format::Svg)])
-        .map_err(|e| anyhow::anyhow!("Failed to generate SVG: {}", e))?;
+    let output = Command::new(&dot_exe)
+        .args(["-Tsvg", dot_path, "-o"])
+        .arg(&svg_path)
+        .output()
+        .with_context(|| format!("Failed to execute: {}", dot_exe.display()))?;
 
-    // Write SVG to file
-    std::fs::write(&svg_path, svg_content)
-        .with_context(|| format!("Failed to write SVG file: {}", svg_path.display()))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow::anyhow!("Graphviz dot failed: {}", stderr));
+    }
 
     let svg_path_str = svg_path.to_string_lossy().to_string();
     println!("Generated SVG file: {}", svg_path_str);
