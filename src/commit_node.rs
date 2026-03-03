@@ -1,5 +1,11 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+pub struct PredecessorInfo {
+    pub parent_id: String,
+    pub url: Option<String>,
+    pub tooltip: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CommitNode {
     pub id: String,
@@ -56,17 +62,43 @@ impl CommitNode {
         self.is_current_checkout = is_current;
     }
 
-    pub fn get_dot_node(&self, url: Option<&str>, tooltip: Option<&str>) -> String {
+    pub fn get_dot_node(&self, predecessors: &[PredecessorInfo]) -> String {
+        let (label_parts, color, has_local_branch, has_remote_branch, has_other_refs) =
+            self.build_label_parts();
+
+        if predecessors.len() > 1 {
+            self.get_dot_node_html(
+                predecessors,
+                &label_parts,
+                color,
+                has_local_branch,
+                has_remote_branch,
+            )
+        } else {
+            let pred = predecessors.first();
+            self.get_dot_node_standard(
+                pred.and_then(|p| p.url.as_deref()),
+                pred.and_then(|p| p.tooltip.as_deref()),
+                &label_parts,
+                color,
+                has_local_branch,
+                has_remote_branch,
+                has_other_refs,
+            )
+        }
+    }
+
+    /// Shared logic: compute label text, color, and ref-type flags.
+    fn build_label_parts(&self) -> (Vec<String>, &'static str, bool, bool, bool) {
         let mut label_parts = Vec::new();
         let mut color = "white";
+        let mut has_local_branch = false;
+        let mut has_remote_branch = false;
+        let mut has_other_refs = false;
 
         if self.refs.is_empty() && self.tags.is_empty() {
             label_parts.push(self._short_id.clone());
         }
-
-        let mut has_local_branch = false;
-        let mut has_remote_branch = false;
-        let mut has_other_refs = false;
 
         if !self.refs.is_empty() {
             let mut local_branches = HashSet::new();
@@ -75,8 +107,7 @@ impl CommitNode {
 
             for r in &self.refs {
                 if r.starts_with("refs/heads/") {
-                    let branch_name = r.trim_start_matches("refs/heads/");
-                    local_branches.insert(branch_name.to_string());
+                    local_branches.insert(r.trim_start_matches("refs/heads/").to_string());
                     has_local_branch = true;
                 } else if r.starts_with("refs/remotes/") {
                     let remote_ref = r.trim_start_matches("refs/remotes/");
@@ -91,30 +122,25 @@ impl CommitNode {
             }
 
             let mut ref_parts = Vec::new();
-            let mut processed_branches = HashSet::new();
+            let mut processed = HashSet::new();
 
-            for local_branch in &local_branches {
-                if let Some(remote_name) = remote_branches.get(local_branch) {
-                    ref_parts.push(format!("🌿🌐 {} ({})", local_branch, remote_name));
-                    processed_branches.insert(local_branch.clone());
+            for lb in &local_branches {
+                if let Some(rn) = remote_branches.get(lb) {
+                    ref_parts.push(format!("🌿🌐 {} ({})", lb, rn));
+                    processed.insert(lb.clone());
                 }
             }
-
-            for local_branch in &local_branches {
-                if !processed_branches.contains(local_branch) {
-                    ref_parts.push(format!("🌿 {}", local_branch));
+            for lb in &local_branches {
+                if !processed.contains(lb) {
+                    ref_parts.push(format!("🌿 {}", lb));
                 }
             }
-
             for (branch, remote) in &remote_branches {
                 if !local_branches.contains(branch) {
                     ref_parts.push(format!("🌐 {}/{}", remote, branch));
                 }
             }
-
-            if !other_refs.is_empty() {
-                ref_parts.extend(other_refs);
-            }
+            ref_parts.extend(other_refs);
 
             if !ref_parts.is_empty() {
                 label_parts.push(ref_parts.join("\\n"));
@@ -143,16 +169,35 @@ impl CommitNode {
             color = "\"#fce4ec\"";
         }
 
+        (
+            label_parts,
+            color,
+            has_local_branch,
+            has_remote_branch,
+            has_other_refs,
+        )
+    }
+
+    /// Standard (0–1 predecessor) rendering — existing appearance.
+    #[allow(clippy::too_many_arguments)]
+    fn get_dot_node_standard(
+        &self,
+        url: Option<&str>,
+        tooltip: Option<&str>,
+        label_parts: &[String],
+        color: &str,
+        has_local_branch: bool,
+        has_remote_branch: bool,
+        has_other_refs: bool,
+    ) -> String {
         let mut label = label_parts.join("\\n");
 
         if self.is_current_checkout {
             label = format!("➤ {}", label);
         }
-
         if self.is_tip {
             label = format!("{} ⭐", label);
         }
-
         if let Some(readme) = &self.branch_readme {
             label = format!("{}\\n📄 {}", label, readme);
         }
@@ -174,27 +219,106 @@ impl CommitNode {
             "\"#2c3e50\""
         };
 
-        let url_attr = if let Some(u) = url {
+        let url_attr = url.map_or(String::new(), |u| {
             format!(", URL=\"{}\", target=\"_blank\"", u)
-        } else {
-            String::new()
-        };
-
-        let tooltip_attr = if let Some(t) = tooltip {
+        });
+        let tooltip_attr = tooltip.map_or(String::new(), |t| {
             let escaped = t
                 .replace('\\', "\\\\")
                 .replace('"', "\\\"")
                 .replace('\n', "\\n");
             format!(", tooltip=\"{}\"", escaped)
-        } else {
-            String::new()
-        };
+        });
 
         format!(
             "\"{}\" [label=\"{}\", shape={}, style=\"rounded,filled,bold\", color={}, fillcolor={}, fontname=\"Arial\", fontsize=8, fontcolor=\"#2c3e50\", penwidth={}, width=0.8, height=0.5{}{}]",
             self.id, label, shape, border_color, color, penwidth, url_attr, tooltip_attr
         )
     }
+
+    /// Multi-predecessor rendering using an HTML-label table.
+    /// Top row: node identity (refs/tags). Bottom row: one cell per predecessor.
+    fn get_dot_node_html(
+        &self,
+        predecessors: &[PredecessorInfo],
+        label_parts: &[String],
+        color: &str,
+        has_local_branch: bool,
+        has_remote_branch: bool,
+    ) -> String {
+        // Strip surrounding quotes from color for use as HTML attribute value.
+        let bgcolor = color.trim_matches('"');
+        let penwidth = if self.is_current_checkout { 3 } else { 1 };
+        let border_color = if self.is_current_checkout {
+            "#f57f17"
+        } else {
+            "#2c3e50"
+        };
+
+        let col_count = predecessors.len();
+
+        // Build top-row identity text (HTML-escape, newlines → <BR/>).
+        let mut identity = label_parts.join("\n");
+        if self.is_current_checkout {
+            identity = format!("➤ {}", identity);
+        }
+        if self.is_tip {
+            identity = format!("{} ⭐", identity);
+        }
+        if let Some(readme) = &self.branch_readme {
+            identity = format!("{}\n📄 {}", identity, readme);
+        }
+        let identity_html = html_escape(&identity).replace('\n', "<BR/>");
+
+        // Top-row cell style.
+        let header_style = if has_local_branch || has_remote_branch {
+            format!(
+                "BORDER=\"{}\" COLOR=\"{}\" BGCOLOR=\"{}\" STYLE=\"ROUNDED\"",
+                penwidth, border_color, bgcolor
+            )
+        } else {
+            format!(
+                "BORDER=\"{}\" COLOR=\"{}\" BGCOLOR=\"{}\"",
+                penwidth, border_color, bgcolor
+            )
+        };
+
+        let mut html = format!(
+            "<<TABLE BORDER=\"0\" CELLBORDER=\"0\" CELLSPACING=\"2\" CELLPADDING=\"4\">\
+             <TR><TD COLSPAN=\"{}\" {} ALIGN=\"CENTER\"><FONT FACE=\"Arial Bold\" POINT-SIZE=\"8\"><B>{}</B></FONT></TD></TR>\
+             <TR>",
+            col_count, header_style, identity_html
+        );
+
+        for (i, pred) in predecessors.iter().enumerate() {
+            let short = &pred.parent_id[..pred.parent_id.len().min(7)];
+            let href_attr = pred.url.as_deref().map_or(String::new(), |u| {
+                format!(" HREF=\"{}\" TARGET=\"_blank\"", html_escape(u))
+            });
+            let tooltip_attr = pred.tooltip.as_deref().map_or(String::new(), |t| {
+                format!(" TOOLTIP=\"{}\"", html_escape(t).replace('\n', "&#10;"))
+            });
+            html.push_str(&format!(
+                "<TD PORT=\"p{}\" BORDER=\"1\" COLOR=\"{}\" BGCOLOR=\"#dfe6ed\" ALIGN=\"CENTER\"{}{}>\
+                 <FONT FACE=\"Arial\" POINT-SIZE=\"7\">← {}</FONT></TD>",
+                i, border_color, href_attr, tooltip_attr, short
+            ));
+        }
+
+        html.push_str("</TR></TABLE>>");
+
+        format!(
+            "\"{}\" [label={}, shape=plaintext, fontname=\"Arial\", fontsize=8]",
+            self.id, html
+        )
+    }
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 impl PartialEq for CommitNode {

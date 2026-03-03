@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
-use crate::commit_node::CommitNode;
+use crate::commit_node::{CommitNode, PredecessorInfo};
 use crate::filter::RefFilter;
 use crate::utils::time_ago;
 
@@ -256,29 +256,26 @@ impl GitGraphviz {
         writeln!(writer, "  graph [splines=ortho, nodesep=0.3, ranksep=0.4];")?;
 
         for commit in condensed_graph.values() {
-            let parent_id = commit_parents
-                .get(&commit.id)
-                .and_then(|parents| parents.first())
-                .map(|s| s.as_str());
-
             let is_ancestor_root = self
                 .ancestor_oid
                 .is_some_and(|a| a.to_string() == commit.id);
 
-            let url = if is_ancestor_root {
-                None
-            } else {
-                self.gitlab_base_url.as_deref().map(|base| match parent_id {
-                    Some(pid) => format!("{}/-/compare/{}...{}", base, pid, commit.id),
-                    None => format!("{}/-/commit/{}", base, commit.id),
-                })
-            };
+            let parents = commit_parents.get(&commit.id).cloned().unwrap_or_default();
 
-            let tooltip = if is_ancestor_root {
-                None
-            } else {
-                let path_commits = self.collect_path_commits(&commit.id, parent_id, 20);
-                if path_commits.is_empty() {
+            let predecessors: Vec<PredecessorInfo> = if is_ancestor_root {
+                vec![PredecessorInfo {
+                    parent_id: String::new(),
+                    url: None,
+                    tooltip: None,
+                }]
+            } else if parents.is_empty() {
+                // Root commit with no parents
+                let url = self
+                    .gitlab_base_url
+                    .as_deref()
+                    .map(|base| format!("{}/-/commit/{}", base, commit.id));
+                let path_commits = self.collect_path_commits(&commit.id, None, 20);
+                let tooltip = if path_commits.is_empty() {
                     None
                 } else {
                     Some(
@@ -290,19 +287,55 @@ impl GitGraphviz {
                             .collect::<Vec<_>>()
                             .join("\n"),
                     )
-                }
+                };
+                vec![PredecessorInfo {
+                    parent_id: String::new(),
+                    url,
+                    tooltip,
+                }]
+            } else {
+                parents
+                    .iter()
+                    .map(|pid| {
+                        let url = self
+                            .gitlab_base_url
+                            .as_deref()
+                            .map(|base| format!("{}/-/compare/{}...{}", base, pid, commit.id));
+                        let path_commits =
+                            self.collect_path_commits(&commit.id, Some(pid.as_str()), 20);
+                        let tooltip = if path_commits.is_empty() {
+                            None
+                        } else {
+                            Some(
+                                path_commits
+                                    .iter()
+                                    .map(|(hash, msg, author, when)| {
+                                        format!("{}: {} ({}, {})", hash, msg, author, when)
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("\n"),
+                            )
+                        };
+                        PredecessorInfo {
+                            parent_id: pid.clone(),
+                            url,
+                            tooltip,
+                        }
+                    })
+                    .collect()
             };
 
-            writeln!(
-                writer,
-                "  {}",
-                commit.get_dot_node(url.as_deref(), tooltip.as_deref())
-            )?;
+            writeln!(writer, "  {}", commit.get_dot_node(&predecessors))?;
         }
 
         for (child_id, parents) in &commit_parents {
-            for parent_id in parents {
-                writeln!(writer, "  \"{}\" -> \"{}\"", parent_id, child_id)?;
+            let multi = parents.len() > 1;
+            for (i, parent_id) in parents.iter().enumerate() {
+                if multi {
+                    writeln!(writer, "  \"{}\" -> \"{}\":p{}", parent_id, child_id, i)?;
+                } else {
+                    writeln!(writer, "  \"{}\" -> \"{}\"", parent_id, child_id)?;
+                }
             }
         }
 
