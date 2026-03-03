@@ -900,6 +900,8 @@ fn main() -> Result<()> {
 
     if !args.no_show {
         let svg_path = generate_svg(&output)?;
+        std::fs::remove_file(&output)
+            .with_context(|| format!("Failed to delete DOT file: {}", output))?;
         open_file(&svg_path)?;
     }
 
