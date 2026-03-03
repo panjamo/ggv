@@ -93,43 +93,41 @@ impl GitGraphviz {
         max: usize,
     ) -> Vec<(String, String, String, String)> {
         let mut result = Vec::new();
-        let mut visited = HashSet::new();
-        let mut queue = std::collections::VecDeque::new();
 
-        if let Ok(oid) = from_id.parse::<Oid>() {
-            queue.push_back(oid);
+        let Ok(oid) = from_id.parse::<Oid>() else {
+            return result;
+        };
+        let Ok(mut revwalk) = self.repo.revwalk() else {
+            return result;
+        };
+        if revwalk.push(oid).is_err() {
+            return result;
+        }
+        if let Some(stop) = stop_id {
+            if let Ok(stop_oid) = stop.parse::<Oid>() {
+                let _ = revwalk.hide(stop_oid);
+            }
         }
 
-        while let Some(oid) = queue.pop_front() {
+        for oid_result in revwalk {
+            let Ok(oid) = oid_result else { break };
+            let Ok(commit) = self.repo.find_commit(oid) else {
+                continue;
+            };
             let id_str = oid.to_string();
-            if visited.contains(&id_str) {
-                continue;
-            }
-            if stop_id.is_some_and(|s| s == id_str) {
-                continue;
-            }
-            visited.insert(id_str.clone());
-
-            if let Ok(commit) = self.repo.find_commit(oid) {
-                let short_id = format!("{:.7}", id_str);
-                let message = commit.summary().unwrap_or("").to_string();
-                let author = commit.author().name().unwrap_or("").to_string();
-                let when = time_ago(commit.time().seconds());
-                result.push((short_id, message, author, when));
-                if result.len() >= max {
-                    result.push((
-                        "...".to_string(),
-                        "(truncated)".to_string(),
-                        String::new(),
-                        String::new(),
-                    ));
-                    break;
-                }
-                for parent_id in commit.parent_ids() {
-                    if !visited.contains(&parent_id.to_string()) {
-                        queue.push_back(parent_id);
-                    }
-                }
+            let short_id = format!("{:.7}", id_str);
+            let message = commit.summary().unwrap_or("").to_string();
+            let author = commit.author().name().unwrap_or("").to_string();
+            let when = time_ago(commit.time().seconds());
+            result.push((short_id, message, author, when));
+            if result.len() >= max {
+                result.push((
+                    "...".to_string(),
+                    "(truncated)".to_string(),
+                    String::new(),
+                    String::new(),
+                ));
+                break;
             }
         }
 
@@ -238,9 +236,10 @@ impl GitGraphviz {
         for commit in condensed_graph.values() {
             let connections =
                 self.find_condensed_connections(&commit.id, &condensed_graph, &referenced_commits)?;
+            let mut seen = HashSet::new();
             let valid: Vec<String> = connections
                 .into_iter()
-                .filter(|id| condensed_graph.contains_key(id))
+                .filter(|id| condensed_graph.contains_key(id) && seen.insert(id.clone()))
                 .collect();
             commit_parents.insert(commit.id.clone(), valid);
         }
@@ -595,11 +594,11 @@ impl GitGraphviz {
         _referenced_commits: &HashMap<String, CommitNode>,
     ) -> Result<Vec<String>> {
         let mut connections = Vec::new();
-        let mut visited = HashSet::new();
 
         if let Ok(commit_oid) = commit_id.parse::<Oid>() {
             if let Ok(commit) = self.repo.find_commit(commit_oid) {
                 for parent_id in commit.parent_ids() {
+                    let mut visited = HashSet::new();
                     let connection = self.find_next_condensed_commit(
                         &parent_id.to_string(),
                         condensed_graph,
