@@ -137,7 +137,7 @@ impl CommitNode {
         self.is_current_checkout = is_current;
     }
 
-    fn get_dot_node(&self, url: Option<&str>) -> String {
+    fn get_dot_node(&self, url: Option<&str>, tooltip: Option<&str>) -> String {
         let mut label_parts = Vec::new();
         let mut color = "white"; // Default color
 
@@ -273,9 +273,19 @@ impl CommitNode {
             String::new()
         };
 
+        let tooltip_attr = if let Some(t) = tooltip {
+            let escaped = t
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n");
+            format!(", tooltip=\"{}\"", escaped)
+        } else {
+            String::new()
+        };
+
         format!(
-            "\"{}\" [label=\"{}\", shape={}, style=\"rounded,filled,bold\", color={}, fillcolor={}, fontname=\"Arial\", fontsize=8, fontcolor=\"#2c3e50\", penwidth={}, width=0.8, height=0.5{}]",
-            self.id, label, shape, border_color, color, penwidth, url_attr
+            "\"{}\" [label=\"{}\", shape={}, style=\"rounded,filled,bold\", color={}, fillcolor={}, fontname=\"Arial\", fontsize=8, fontcolor=\"#2c3e50\", penwidth={}, width=0.8, height=0.5{}{}]",
+            self.id, label, shape, border_color, color, penwidth, url_attr, tooltip_attr
         )
     }
 }
@@ -360,6 +370,49 @@ impl GitGraphviz {
             }
         }
         None
+    }
+
+    fn collect_path_commits(
+        &self,
+        from_id: &str,
+        stop_id: Option<&str>,
+        max: usize,
+    ) -> Vec<(String, String)> {
+        let mut result = Vec::new();
+        let mut visited = HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+
+        if let Ok(oid) = from_id.parse::<Oid>() {
+            queue.push_back(oid);
+        }
+
+        while let Some(oid) = queue.pop_front() {
+            let id_str = oid.to_string();
+            if visited.contains(&id_str) {
+                continue;
+            }
+            if stop_id.is_some_and(|s| s == id_str) {
+                continue;
+            }
+            visited.insert(id_str.clone());
+
+            if let Ok(commit) = self.repo.find_commit(oid) {
+                let short_id = format!("{:.7}", id_str);
+                let message = commit.summary().unwrap_or("").to_string();
+                result.push((short_id, message));
+                if result.len() >= max {
+                    result.push(("...".to_string(), "(truncated)".to_string()));
+                    break;
+                }
+                for parent_id in commit.parent_ids() {
+                    if !visited.contains(&parent_id.to_string()) {
+                        queue.push_back(parent_id);
+                    }
+                }
+            }
+        }
+
+        result
     }
 
     fn generate_dot(&self, output_path: &str) -> Result<()> {
@@ -474,18 +527,34 @@ impl GitGraphviz {
 
         // Write all commit nodes with compare URLs (parent..child shows accumulated diff)
         for commit in condensed_graph.values() {
-            let url = self.gitlab_base_url.as_deref().map(|base| {
-                match commit_parents
-                    .get(&commit.id)
-                    .and_then(|parents| parents.first())
-                {
-                    Some(parent_id) => {
-                        format!("{}/-/compare/{}...{}", base, parent_id, commit.id)
-                    }
-                    None => format!("{}/-/commit/{}", base, commit.id),
-                }
+            let parent_id = commit_parents
+                .get(&commit.id)
+                .and_then(|parents| parents.first())
+                .map(|s| s.as_str());
+
+            let url = self.gitlab_base_url.as_deref().map(|base| match parent_id {
+                Some(pid) => format!("{}/-/compare/{}...{}", base, pid, commit.id),
+                None => format!("{}/-/commit/{}", base, commit.id),
             });
-            writeln!(writer, "  {}", commit.get_dot_node(url.as_deref()))?;
+
+            let path_commits = self.collect_path_commits(&commit.id, parent_id, 20);
+            let tooltip = if path_commits.is_empty() {
+                None
+            } else {
+                Some(
+                    path_commits
+                        .iter()
+                        .map(|(hash, msg)| format!("{}: {}", hash, msg))
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                )
+            };
+
+            writeln!(
+                writer,
+                "  {}",
+                commit.get_dot_node(url.as_deref(), tooltip.as_deref())
+            )?;
         }
 
         // Write edges from pre-computed connections
