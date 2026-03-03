@@ -377,7 +377,7 @@ impl GitGraphviz {
         from_id: &str,
         stop_id: Option<&str>,
         max: usize,
-    ) -> Vec<(String, String)> {
+    ) -> Vec<(String, String, String, String)> {
         let mut result = Vec::new();
         let mut visited = HashSet::new();
         let mut queue = std::collections::VecDeque::new();
@@ -399,9 +399,11 @@ impl GitGraphviz {
             if let Ok(commit) = self.repo.find_commit(oid) {
                 let short_id = format!("{:.7}", id_str);
                 let message = commit.summary().unwrap_or("").to_string();
-                result.push((short_id, message));
+                let author = commit.author().name().unwrap_or("").to_string();
+                let when = time_ago(commit.time().seconds());
+                result.push((short_id, message, author, when));
                 if result.len() >= max {
-                    result.push(("...".to_string(), "(truncated)".to_string()));
+                    result.push(("...".to_string(), "(truncated)".to_string(), String::new(), String::new()));
                     break;
                 }
                 for parent_id in commit.parent_ids() {
@@ -544,7 +546,7 @@ impl GitGraphviz {
                 Some(
                     path_commits
                         .iter()
-                        .map(|(hash, msg)| format!("{}: {}", hash, msg))
+                        .map(|(hash, msg, author, when)| format!("{}: {} ({}, {})", hash, msg, author, when))
                         .collect::<Vec<_>>()
                         .join("\n"),
                 )
@@ -944,6 +946,27 @@ fn open_file(file_path: &str) -> Result<()> {
 
     println!("Opened file: {}", file_path);
     Ok(())
+}
+
+fn time_ago(timestamp: i64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let diff = now - timestamp;
+    if diff < 60 {
+        format!("{} seconds ago", diff)
+    } else if diff < 3600 {
+        format!("{} minutes ago", diff / 60)
+    } else if diff < 86400 {
+        format!("{} hours ago", diff / 3600)
+    } else if diff < 86400 * 30 {
+        format!("{} days ago", diff / 86400)
+    } else if diff < 86400 * 365 {
+        format!("{} months ago", diff / (86400 * 30))
+    } else {
+        format!("{} years ago", diff / (86400 * 365))
+    }
 }
 
 fn repo_name_from_path(repo_path: &str) -> String {
