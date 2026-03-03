@@ -36,4 +36,18 @@ pub struct Args {
         help = "Limit graph to this commit and its descendants (accepts commit hash, branch, or tag)"
     )]
     pub from: Option<String>,
+
+    #[arg(
+        long,
+        help = "Skip automatic 'git fetch --tags' before generating the graph",
+        action = clap::ArgAction::SetTrue
+    )]
+    pub no_fetch: bool,
+
+    #[arg(
+        long,
+        help = "Keep the intermediate DOT file after SVG generation",
+        action = clap::ArgAction::SetTrue
+    )]
+    pub keep_dot: bool,
 }

@@ -8,6 +8,8 @@ A Rust CLI tool that generates visual representations of Git repository structur
 
 - **Comprehensive Visualization**: Displays commits, branches, remote branches, tags, and HEAD
 - **Condensed Graph**: Only referenced commits (branch tips, tags, root, merge junctions) are shown — intermediate commits are skipped for clarity
+- **Dark Developer Theme**: Branch nodes are color-coded by type (main, develop, feature/\*, release/\*, hotfix/\*) on a dark slate background
+- **Auto Fetch**: Runs `git fetch --tags` before generating the graph to ensure tags are current
 - **SVG Output**: Generates high-quality SVG images opened automatically in your default viewer
 - **Ref Filtering**: Choose which ref types to include (local branches, remotes, tags, HEAD)
 - **Subtree View**: Limit the graph to a specific commit and all its descendants (`--from`)
@@ -74,6 +76,8 @@ Options:
                                (auto-detected from remote if not specified)
       --from <COMMIT>          Limit graph to this commit and its descendants
                                (accepts commit hash, branch name, or tag)
+      --no-fetch               Skip automatic 'git fetch --tags' before generating the graph
+      --keep-dot               Keep the intermediate DOT file after SVG generation
   -h, --help                   Print help
   -V, --version                Print version
 ```
@@ -96,6 +100,18 @@ Generate DOT file only, no SVG:
 
 ```bash
 ggv --no-show
+```
+
+Skip the automatic tag fetch (faster, offline):
+
+```bash
+ggv --no-fetch
+```
+
+Keep the intermediate DOT file alongside the SVG:
+
+```bash
+ggv --keep-dot
 ```
 
 Show only local branches (no remotes, no tags):
@@ -138,21 +154,30 @@ ggv --from v1.0.0 --filter b
 ## Output
 
 1. **SVG file** (`ggv-<repo-name>.svg`): Visual graph opened automatically in your default viewer.
-   The intermediate DOT file is deleted after SVG generation.
+   The intermediate DOT file is deleted after SVG generation unless `--keep-dot` is set.
 2. With `--no-show`: only the **DOT file** is written (`ggv-<repo-name>.dot`).
 
 ### Graph Elements
 
-| Element | Shape | Color |
-|---------|-------|-------|
-| Current checkout | box | Yellow |
-| Local branch tip | box | Light blue |
-| Remote-only ref | box | Light green |
-| Tag | octagon | Light pink |
-| ROOT / HEAD | house | Light orange |
-| Plain commit | egg | White |
+Branch nodes are color-coded by name on a dark slate background (`#0F172A`):
 
-Nodes with both a local branch and a matching remote branch are shown combined (`🌿🌐 branch (remote)`).
+| Branch pattern | Fill | Border |
+|----------------|------|--------|
+| `main` / `master` | `#059669` green | `#34D399` |
+| `develop` | `#7C3AED` violet | `#A78BFA` |
+| `feature/*` | `#2563EB` blue | `#60A5FA` |
+| `release/*` | `#D97706` orange | `#FBBF24` |
+| `hotfix/*` | `#DC2626` red | `#F87171` |
+| other branches | `#334155` slate | `#60A5FA` |
+
+| Element | Style |
+|---------|-------|
+| Branch node | Rounded rectangle |
+| Tag node | Dashed border, transparent fill, muted text |
+| Current checkout | 2px border + `CURRENT` label |
+| Plain commit / junction | Subtle dark panel |
+
+Nodes with both a local branch and a matching remote branch are shown combined (`branch [remote]`).
 Hover tooltips show the commits condensed into each graph edge.
 Clicking a node (in a browser) opens the GitLab compare view for that range.
 

@@ -5,7 +5,7 @@ mod graph;
 mod graphviz;
 mod utils;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use args::Args;
 use clap::Parser;
 use filter::RefFilter;
@@ -13,8 +13,23 @@ use graph::GitGraphviz;
 use graphviz::{generate_svg, open_file};
 use utils::repo_name_from_path;
 
+fn fetch_tags(repo_path: &str) -> Result<()> {
+    let status = std::process::Command::new("git")
+        .args(["-C", repo_path, "fetch", "--tags"])
+        .status()
+        .context("Failed to run 'git fetch --tags'")?;
+    if !status.success() {
+        eprintln!("Warning: 'git fetch --tags' exited with status {}", status);
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    if !args.no_fetch {
+        fetch_tags(&args.repo_path)?;
+    }
 
     let output = args.output.unwrap_or_else(|| {
         let repo_name = repo_name_from_path(&args.repo_path);
@@ -42,6 +57,10 @@ fn main() -> Result<()> {
 
     if !args.no_show {
         let svg_path = generate_svg(&output)?;
+        if !args.keep_dot {
+            std::fs::remove_file(&output)
+                .with_context(|| format!("Failed to delete DOT file: {}", output))?;
+        }
         open_file(&svg_path)?;
     }
 
