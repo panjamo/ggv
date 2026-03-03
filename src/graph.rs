@@ -195,6 +195,8 @@ impl GitGraphviz {
             self.add_tagged_commits(&mut referenced_commits)?;
         }
 
+        self.add_merge_base_commits(&mut referenced_commits, &branch_tips)?;
+
         if let Some(ancestor_oid) = self.ancestor_oid {
             let ancestor_id_str = ancestor_oid.to_string();
 
@@ -471,6 +473,31 @@ impl GitGraphviz {
                 }
             }
         }
+        Ok(())
+    }
+
+    fn add_merge_base_commits(
+        &self,
+        all_commits: &mut HashMap<String, CommitNode>,
+        branch_tips: &HashMap<String, String>,
+    ) -> Result<()> {
+        let tip_oids: Vec<Oid> = {
+            let mut seen = HashSet::new();
+            branch_tips
+                .values()
+                .filter_map(|id| id.parse::<Oid>().ok())
+                .filter(|oid| seen.insert(*oid))
+                .collect()
+        };
+
+        for i in 0..tip_oids.len() {
+            for j in (i + 1)..tip_oids.len() {
+                if let Ok(base_oid) = self.repo.merge_base(tip_oids[i], tip_oids[j]) {
+                    self.add_ref_commit(all_commits, base_oid)?;
+                }
+            }
+        }
+
         Ok(())
     }
 
