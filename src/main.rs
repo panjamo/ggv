@@ -22,10 +22,9 @@ struct Args {
     #[arg(
         short,
         long,
-        help = "Output DOT file path",
-        default_value = "git-graph.dot"
+        help = "Output DOT file path (default: ggv-<repo-name>.dot)"
     )]
-    output: String,
+    output: Option<String>,
 
     #[arg(long, help = "Skip SVG generation and opening", action = clap::ArgAction::SetTrue)]
     no_show: bool,
@@ -878,15 +877,29 @@ fn open_file(file_path: &str) -> Result<()> {
     Ok(())
 }
 
+fn repo_name_from_path(repo_path: &str) -> String {
+    let path = std::path::Path::new(repo_path);
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    canonical
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("repo")
+        .to_string()
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
+    let output = args
+        .output
+        .unwrap_or_else(|| format!("ggv-{}.dot", repo_name_from_path(&args.repo_path)));
+
     let filter = RefFilter::from_string(&args.filter);
     let git_viz = GitGraphviz::new(&args.repo_path, filter, args.gitlab_url)?;
-    git_viz.generate_dot(&args.output)?;
+    git_viz.generate_dot(&output)?;
 
     if !args.no_show {
-        let svg_path = generate_svg(&args.output)?;
+        let svg_path = generate_svg(&output)?;
         open_file(&svg_path)?;
     }
 
