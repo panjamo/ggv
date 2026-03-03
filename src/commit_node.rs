@@ -215,7 +215,7 @@ impl CommitNode {
         } else if !self.tags.is_empty() {
             "octagon"
         } else {
-            "egg"
+            "box"
         };
 
         let penwidth = if self.is_current_checkout { 3 } else { 0 };
