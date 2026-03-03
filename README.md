@@ -78,7 +78,7 @@ Options:
                                (accepts commit hash, branch name, or tag)
       --no-fetch               Skip automatic 'git fetch --tags' before generating the graph
       --keep-dot               Keep the intermediate DOT file after SVG generation
-      --theme <THEME>          Color theme: dark (default) or light [default: dark]
+      --theme <THEME>          Color theme: dark  or light [default: light]
   -h, --help                   Print help
   -V, --version                Print version
 ```
