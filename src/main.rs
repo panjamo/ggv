@@ -37,6 +37,12 @@ struct Args {
         help = "GitLab base URL for clickable commit links (e.g. https://gitlab.com/namespace/project). Auto-detected from remote if not specified."
     )]
     gitlab_url: Option<String>,
+
+    #[arg(
+        long,
+        help = "Limit graph to this commit and its descendants (accepts commit hash, branch, or tag)"
+    )]
+    from: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -309,19 +315,38 @@ struct GitGraphviz {
     repo: Repository,
     filter: RefFilter,
     gitlab_base_url: Option<String>,
+    ancestor_oid: Option<Oid>,
 }
 
 impl GitGraphviz {
-    fn new(repo_path: &str, filter: RefFilter, gitlab_url: Option<String>) -> Result<Self> {
+    fn new(
+        repo_path: &str,
+        filter: RefFilter,
+        gitlab_url: Option<String>,
+        from_commit: Option<String>,
+    ) -> Result<Self> {
         let repo = Repository::open(repo_path)
             .with_context(|| format!("Failed to open repository at: {}", repo_path))?;
 
         let gitlab_base_url = gitlab_url.or_else(|| Self::detect_gitlab_url(&repo));
 
+        let ancestor_oid = if let Some(ref spec) = from_commit {
+            let obj = repo
+                .revparse_single(spec)
+                .with_context(|| format!("Could not resolve --from '{}' to a commit", spec))?;
+            let commit = obj
+                .peel_to_commit()
+                .with_context(|| format!("'{}' does not point to a commit", spec))?;
+            Some(commit.id())
+        } else {
+            None
+        };
+
         Ok(Self {
             repo,
             filter,
             gitlab_base_url,
+            ancestor_oid,
         })
     }
 
@@ -481,8 +506,30 @@ impl GitGraphviz {
             self.add_tagged_commits(&mut referenced_commits)?;
         }
 
-        // Add root commits (commits with no parents) as if they were referenced
-        self.add_root_commits(&mut referenced_commits)?;
+        // Apply ancestor filter: keep only the specified commit and its descendants
+        if let Some(ancestor_oid) = self.ancestor_oid {
+            let ancestor_id_str = ancestor_oid.to_string();
+
+            // Ensure the ancestor itself is present and marked as ROOT
+            let commit_id = self.add_ref_commit(&mut referenced_commits, ancestor_oid)?;
+            if let Some(node) = referenced_commits.get_mut(&commit_id) {
+                node.add_ref("ROOT".to_string());
+            }
+
+            // Retain only the ancestor and commits that descend from it
+            referenced_commits.retain(|id, _| {
+                if *id == ancestor_id_str {
+                    return true;
+                }
+                id.parse::<Oid>()
+                    .ok()
+                    .and_then(|oid| self.repo.graph_descendant_of(oid, ancestor_oid).ok())
+                    .unwrap_or(false)
+            });
+        } else {
+            // Add root commits (commits with no parents) as if they were referenced
+            self.add_root_commits(&mut referenced_commits)?;
+        }
 
         // Add branch readme information
         self.add_branch_readmes(&mut referenced_commits, &branch_tips)?;
@@ -534,24 +581,36 @@ impl GitGraphviz {
                 .and_then(|parents| parents.first())
                 .map(|s| s.as_str());
 
-            let url = self.gitlab_base_url.as_deref().map(|base| match parent_id {
-                Some(pid) => format!("{}/-/compare/{}...{}", base, pid, commit.id),
-                None => format!("{}/-/commit/{}", base, commit.id),
-            });
+            let is_ancestor_root = self
+                .ancestor_oid
+                .is_some_and(|a| a.to_string() == commit.id);
 
-            let path_commits = self.collect_path_commits(&commit.id, parent_id, 20);
-            let tooltip = if path_commits.is_empty() {
+            let url = if is_ancestor_root {
                 None
             } else {
-                Some(
-                    path_commits
-                        .iter()
-                        .map(|(hash, msg, author, when)| {
-                            format!("{}: {} ({}, {})", hash, msg, author, when)
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                )
+                self.gitlab_base_url.as_deref().map(|base| match parent_id {
+                    Some(pid) => format!("{}/-/compare/{}...{}", base, pid, commit.id),
+                    None => format!("{}/-/commit/{}", base, commit.id),
+                })
+            };
+
+            let tooltip = if is_ancestor_root {
+                None
+            } else {
+                let path_commits = self.collect_path_commits(&commit.id, parent_id, 20);
+                if path_commits.is_empty() {
+                    None
+                } else {
+                    Some(
+                        path_commits
+                            .iter()
+                            .map(|(hash, msg, author, when)| {
+                                format!("{}: {} ({}, {})", hash, msg, author, when)
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )
+                }
             };
 
             writeln!(
@@ -1071,7 +1130,7 @@ fn main() -> Result<()> {
         .unwrap_or_else(|| format!("ggv-{}.dot", repo_name_from_path(&args.repo_path)));
 
     let filter = RefFilter::from_string(&args.filter);
-    let git_viz = GitGraphviz::new(&args.repo_path, filter, args.gitlab_url)?;
+    let git_viz = GitGraphviz::new(&args.repo_path, filter, args.gitlab_url, args.from)?;
     git_viz.generate_dot(&output)?;
 
     if !args.no_show {

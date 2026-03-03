@@ -10,6 +10,7 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **Condensed Graph**: Only referenced commits (branch tips, tags, root, merge junctions) are shown — intermediate commits are skipped for clarity
 - **SVG Output**: Generates high-quality SVG images opened automatically in your default viewer
 - **Ref Filtering**: Choose which ref types to include (local branches, remotes, tags, HEAD)
+- **Subtree View**: Limit the graph to a specific commit and all its descendants (`--from`)
 - **GitLab Integration**: Clickable commit nodes linking to GitLab compare views, auto-detected from the remote URL
 - **Cross-Platform**: Works on Windows, macOS, and Linux
 
@@ -71,6 +72,8 @@ Options:
   -f, --filter <CHARS>         Ref types to include: b=branches, r=remotes, t=tags, h=head [default: brt]
       --gitlab-url <URL>       GitLab base URL for clickable commit links
                                (auto-detected from remote if not specified)
+      --from <COMMIT>          Limit graph to this commit and its descendants
+                               (accepts commit hash, branch name, or tag)
   -h, --help                   Print help
   -V, --version                Print version
 ```
@@ -111,6 +114,25 @@ Override the GitLab URL for clickable links:
 
 ```bash
 ggv --gitlab-url https://gitlab.com/mygroup/myproject
+```
+
+Show only the history from a specific commit onwards (new root):
+
+```bash
+ggv --from abc1234
+```
+
+Use a branch name or tag as the new root:
+
+```bash
+ggv --from feature/my-branch
+ggv --from v2.0.0
+```
+
+Combine with filtering — show only local branches descending from a tag:
+
+```bash
+ggv --from v1.0.0 --filter b
 ```
 
 ## Output
