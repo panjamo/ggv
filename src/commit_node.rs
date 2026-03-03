@@ -98,6 +98,12 @@ impl CommitNode {
 
         if self.refs.is_empty() && self.tags.is_empty() {
             label_parts.push(self._short_id.clone());
+            if let Some(summary) = self._message.lines().next() {
+                let summary = summary.trim();
+                if !summary.is_empty() {
+                    label_parts.push(strip_merge_remote(summary));
+                }
+            }
         }
 
         if !self.refs.is_empty() {
@@ -312,6 +318,17 @@ impl CommitNode {
             self.id, html
         )
     }
+}
+
+/// Strips the remote URL from git merge messages.
+/// "Merge branch 'X' of <url> into Y" → "Merge branch 'X' into Y"
+fn strip_merge_remote(msg: &str) -> String {
+    if let Some(of_pos) = msg.find(" of ") {
+        if let Some(into_offset) = msg[of_pos..].find(" into ") {
+            return format!("{}{}", &msg[..of_pos], &msg[of_pos + into_offset..]);
+        }
+    }
+    msg.to_string()
 }
 
 fn html_escape(s: &str) -> String {
