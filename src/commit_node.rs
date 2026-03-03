@@ -66,7 +66,9 @@ impl CommitNode {
         let (label_parts, color, has_local_branch, has_remote_branch, has_other_refs) =
             self.build_label_parts();
 
-        if predecessors.len() > 1 {
+        let is_plain = self.refs.is_empty() && self.tags.is_empty();
+
+        if predecessors.len() > 1 || is_plain {
             self.get_dot_node_html(
                 predecessors,
                 &label_parts,
