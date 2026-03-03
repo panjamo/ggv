@@ -138,7 +138,7 @@ impl CommitNode {
         self.is_current_checkout = is_current;
     }
 
-    fn get_dot_node(&self, gitlab_base_url: Option<&str>) -> String {
+    fn get_dot_node(&self, url: Option<&str>) -> String {
         let mut label_parts = Vec::new();
         let mut color = "white"; // Default color
 
@@ -251,9 +251,7 @@ impl CommitNode {
         }
 
         // Choose shape based on reference type
-        let shape = if has_local_branch {
-            "box"
-        } else if has_remote_branch {
+        let shape = if has_local_branch || has_remote_branch {
             "box"
         } else if has_other_refs {
             "house"
@@ -270,11 +268,8 @@ impl CommitNode {
             "\"#2c3e50\""
         };
 
-        let url_attr = if let Some(base_url) = gitlab_base_url {
-            format!(
-                ", URL=\"{}/-/commit/{}\", target=\"_blank\"",
-                base_url, self.id
-            )
+        let url_attr = if let Some(u) = url {
+            format!(", URL=\"{}\", target=\"_blank\"", u)
         } else {
             String::new()
         };
@@ -455,6 +450,18 @@ impl GitGraphviz {
         // Find junction commits and trace connections between referenced commits
         let condensed_graph = self.build_condensed_graph(&referenced_commits)?;
 
+        // Pre-compute all condensed connections (needed for both URLs and edges)
+        let mut commit_parents: HashMap<String, Vec<String>> = HashMap::new();
+        for commit in condensed_graph.values() {
+            let connections =
+                self.find_condensed_connections(&commit.id, &condensed_graph, &referenced_commits)?;
+            let valid: Vec<String> = connections
+                .into_iter()
+                .filter(|id| condensed_graph.contains_key(id))
+                .collect();
+            commit_parents.insert(commit.id.clone(), valid);
+        }
+
         // Write DOT file with enhanced styling
         writeln!(writer, "digraph git {{")?;
         writeln!(writer, "  rankdir=BT;")?; // Bottom to Top (flipped)
@@ -466,24 +473,26 @@ impl GitGraphviz {
         )?;
         writeln!(writer, "  graph [splines=ortho, nodesep=0.3, ranksep=0.4];")?;
 
-        // Write all commit nodes (now condensed)
+        // Write all commit nodes with compare URLs (parent..child shows accumulated diff)
         for commit in condensed_graph.values() {
-            writeln!(
-                writer,
-                "  {}",
-                commit.get_dot_node(self.gitlab_base_url.as_deref())
-            )?;
+            let url = self.gitlab_base_url.as_deref().map(|base| {
+                match commit_parents
+                    .get(&commit.id)
+                    .and_then(|parents| parents.first())
+                {
+                    Some(parent_id) => {
+                        format!("{}/-/compare/{}...{}", base, parent_id, commit.id)
+                    }
+                    None => format!("{}/-/commit/{}", base, commit.id),
+                }
+            });
+            writeln!(writer, "  {}", commit.get_dot_node(url.as_deref()))?;
         }
 
-        // Write connections between commits in the condensed graph
-        for commit in condensed_graph.values() {
-            let connections =
-                self.find_condensed_connections(&commit.id, &condensed_graph, &referenced_commits)?;
-
-            for connection_id in connections {
-                if condensed_graph.contains_key(&connection_id) {
-                    writeln!(writer, "  \"{}\" -> \"{}\"", connection_id, commit.id)?;
-                }
+        // Write edges from pre-computed connections
+        for (child_id, parents) in &commit_parents {
+            for parent_id in parents {
+                writeln!(writer, "  \"{}\" -> \"{}\"", parent_id, child_id)?;
             }
         }
 
