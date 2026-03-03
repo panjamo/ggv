@@ -37,6 +37,12 @@ struct Args {
         default_value = "brt"
     )]
     filter: String,
+
+    #[arg(
+        long,
+        help = "GitLab base URL for clickable commit links (e.g. https://gitlab.com/namespace/project). Auto-detected from remote if not specified."
+    )]
+    gitlab_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -132,7 +138,7 @@ impl CommitNode {
         self.is_current_checkout = is_current;
     }
 
-    fn get_dot_node(&self) -> String {
+    fn get_dot_node(&self, gitlab_base_url: Option<&str>) -> String {
         let mut label_parts = Vec::new();
         let mut color = "white"; // Default color
 
@@ -264,9 +270,18 @@ impl CommitNode {
             "\"#2c3e50\""
         };
 
+        let url_attr = if let Some(base_url) = gitlab_base_url {
+            format!(
+                ", URL=\"{}/-/commit/{}\", target=\"_blank\"",
+                base_url, self.id
+            )
+        } else {
+            String::new()
+        };
+
         format!(
-            "\"{}\" [label=\"{}\", shape={}, style=\"rounded,filled,bold\", color={}, fillcolor={}, fontname=\"Arial\", fontsize=8, fontcolor=\"#2c3e50\", penwidth={}, width=0.8, height=0.5]",
-            self.id, label, shape, border_color, color, penwidth
+            "\"{}\" [label=\"{}\", shape={}, style=\"rounded,filled,bold\", color={}, fillcolor={}, fontname=\"Arial\", fontsize=8, fontcolor=\"#2c3e50\", penwidth={}, width=0.8, height=0.5{}]",
+            self.id, label, shape, border_color, color, penwidth, url_attr
         )
     }
 }
@@ -294,14 +309,63 @@ impl Ord for CommitNode {
 struct GitGraphviz {
     repo: Repository,
     filter: RefFilter,
+    gitlab_base_url: Option<String>,
 }
 
 impl GitGraphviz {
-    fn new(repo_path: &str, filter: RefFilter) -> Result<Self> {
+    fn new(repo_path: &str, filter: RefFilter, gitlab_url: Option<String>) -> Result<Self> {
         let repo = Repository::open(repo_path)
             .with_context(|| format!("Failed to open repository at: {}", repo_path))?;
 
-        Ok(Self { repo, filter })
+        let gitlab_base_url = gitlab_url.or_else(|| Self::detect_gitlab_url(&repo));
+
+        Ok(Self {
+            repo,
+            filter,
+            gitlab_base_url,
+        })
+    }
+
+    fn parse_gitlab_remote_url(url: &str) -> Option<String> {
+        // SSH: git@gitlab.example.com:namespace/project.git
+        if let Some(rest) = url.strip_prefix("git@") {
+            if let Some((host, path)) = rest.split_once(':') {
+                let path = path.trim_end_matches(".git");
+                return Some(format!("https://{}/{}", host, path));
+            }
+        }
+        // HTTPS: https://gitlab.example.com/namespace/project.git
+        if url.starts_with("https://") || url.starts_with("http://") {
+            let trimmed = url.trim_end_matches(".git");
+            return Some(trimmed.to_string());
+        }
+        None
+    }
+
+    fn detect_gitlab_url(repo: &Repository) -> Option<String> {
+        // Try "origin" first, then any other remote
+        if let Ok(remote) = repo.find_remote("origin") {
+            if let Some(url) = remote.url() {
+                if let Some(base_url) = Self::parse_gitlab_remote_url(url) {
+                    return Some(base_url);
+                }
+            }
+        }
+        if let Ok(remotes) = repo.remotes() {
+            for remote_name in remotes.iter().flatten() {
+                if remote_name == "origin" {
+                    continue;
+                }
+                if let Ok(remote) = repo.find_remote(remote_name) {
+                    if let Some(url) = remote.url() {
+                        if let Some(base_url) = Self::parse_gitlab_remote_url(url) {
+                            return Some(base_url);
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn generate_dot(&self, output_path: &str) -> Result<()> {
@@ -353,7 +417,7 @@ impl GitGraphviz {
             if let Some(oid) = head.target() {
                 let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
                 current_checkout_id = Some(commit_id.clone());
-                
+
                 // Only add HEAD as a visible ref if filter includes it
                 if self.filter.should_include_head() {
                     if let Some(commit_node) = referenced_commits.get_mut(&commit_id) {
@@ -404,7 +468,11 @@ impl GitGraphviz {
 
         // Write all commit nodes (now condensed)
         for commit in condensed_graph.values() {
-            writeln!(writer, "  {}", commit.get_dot_node())?;
+            writeln!(
+                writer,
+                "  {}",
+                commit.get_dot_node(self.gitlab_base_url.as_deref())
+            )?;
         }
 
         // Write connections between commits in the condensed graph
@@ -805,7 +873,7 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     let filter = RefFilter::from_string(&args.filter);
-    let git_viz = GitGraphviz::new(&args.repo_path, filter)?;
+    let git_viz = GitGraphviz::new(&args.repo_path, filter, args.gitlab_url)?;
     git_viz.generate_dot(&args.output)?;
 
     if !args.no_show {
