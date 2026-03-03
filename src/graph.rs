@@ -248,13 +248,19 @@ impl GitGraphviz {
 
         writeln!(writer, "digraph git {{")?;
         writeln!(writer, "  rankdir=BT;")?;
-        writeln!(writer, "  bgcolor=\"#f8f9fa\";")?;
-        writeln!(writer, "  node [fontname=\"Arial Bold\", fontsize=10];")?;
+        writeln!(writer, "  bgcolor=\"#0F172A\";")?;
         writeln!(
             writer,
-            "  edge [color=\"#495057\", penwidth=2, arrowsize=0.8, arrowhead=vee];"
+            "  node [fontname=\"Arial\", fontsize=9, fontcolor=\"#E2E8F0\", fillcolor=\"#1E293B\", color=\"#475569\", style=filled];"
         )?;
-        writeln!(writer, "  graph [splines=ortho, nodesep=0.3, ranksep=0.4];")?;
+        writeln!(
+            writer,
+            "  edge [color=\"#475569\", penwidth=1.5, arrowsize=0.7, arrowhead=vee];"
+        )?;
+        writeln!(
+            writer,
+            "  graph [splines=ortho, nodesep=0.4, ranksep=0.5, pad=\"0.5,0.5\"];"
+        )?;
 
         for commit in condensed_graph.values() {
             let is_ancestor_root = self

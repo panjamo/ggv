@@ -5,7 +5,7 @@ mod graph;
 mod graphviz;
 mod utils;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use args::Args;
 use clap::Parser;
 use filter::RefFilter;
@@ -42,8 +42,6 @@ fn main() -> Result<()> {
 
     if !args.no_show {
         let svg_path = generate_svg(&output)?;
-        std::fs::remove_file(&output)
-            .with_context(|| format!("Failed to delete DOT file: {}", output))?;
         open_file(&svg_path)?;
     }
 

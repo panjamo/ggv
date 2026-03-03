@@ -20,6 +20,59 @@ pub struct CommitNode {
     is_current_checkout: bool,
 }
 
+struct NodeColors {
+    fill: &'static str,
+    border: &'static str,
+    font: &'static str,
+    dashed: bool,
+}
+
+fn branch_style(branch_name: &str) -> NodeColors {
+    if branch_name == "main" || branch_name == "master" {
+        NodeColors {
+            fill: "#059669",
+            border: "#34D399",
+            font: "#F0FDF4",
+            dashed: false,
+        }
+    } else if branch_name == "develop" {
+        NodeColors {
+            fill: "#7C3AED",
+            border: "#A78BFA",
+            font: "#F5F3FF",
+            dashed: false,
+        }
+    } else if branch_name.starts_with("feature/") {
+        NodeColors {
+            fill: "#2563EB",
+            border: "#60A5FA",
+            font: "#EFF6FF",
+            dashed: false,
+        }
+    } else if branch_name.starts_with("release/") {
+        NodeColors {
+            fill: "#D97706",
+            border: "#FBBF24",
+            font: "#FFFBEB",
+            dashed: false,
+        }
+    } else if branch_name.starts_with("hotfix/") {
+        NodeColors {
+            fill: "#DC2626",
+            border: "#F87171",
+            font: "#FEF2F2",
+            dashed: false,
+        }
+    } else {
+        NodeColors {
+            fill: "#334155",
+            border: "#60A5FA",
+            font: "#E2E8F0",
+            dashed: false,
+        }
+    }
+}
+
 impl CommitNode {
     pub fn new(commit: &git2::Commit) -> Self {
         let id = commit.id().to_string();
@@ -63,7 +116,7 @@ impl CommitNode {
     }
 
     pub fn get_dot_node(&self, predecessors: &[PredecessorInfo]) -> String {
-        let (label_parts, color, has_local_branch, has_remote_branch, has_other_refs) =
+        let (label_parts, colors, has_local_branch, has_remote_branch, has_other_refs) =
             self.build_label_parts();
 
         let is_plain = self.refs.is_empty() && self.tags.is_empty();
@@ -72,7 +125,7 @@ impl CommitNode {
             self.get_dot_node_html(
                 predecessors,
                 &label_parts,
-                color,
+                &colors,
                 has_local_branch,
                 has_remote_branch,
             )
@@ -82,7 +135,7 @@ impl CommitNode {
                 pred.and_then(|p| p.url.as_deref()),
                 pred.and_then(|p| p.tooltip.as_deref()),
                 &label_parts,
-                color,
+                &colors,
                 has_local_branch,
                 has_remote_branch,
                 has_other_refs,
@@ -90,14 +143,15 @@ impl CommitNode {
         }
     }
 
-    /// Shared logic: compute label text, color, and ref-type flags.
-    fn build_label_parts(&self) -> (Vec<String>, &'static str, bool, bool, bool) {
+    /// Compute label text and node colors from refs/tags.
+    fn build_label_parts(&self) -> (Vec<String>, NodeColors, bool, bool, bool) {
         let mut label_parts = Vec::new();
-        let mut color = "white";
         let mut has_local_branch = false;
         let mut has_remote_branch = false;
         let mut has_other_refs = false;
+        let mut primary_branch: Option<String> = None;
 
+        // Plain commit (junction node or unlabeled)
         if self.refs.is_empty() && self.tags.is_empty() {
             label_parts.push(self._short_id.clone());
             if let Some(summary) = self._message.lines().next() {
@@ -106,25 +160,48 @@ impl CommitNode {
                     label_parts.push(strip_merge_remote(summary));
                 }
             }
+            let colors = if self.is_current_checkout {
+                NodeColors {
+                    fill: "#334155",
+                    border: "#F8FAFC",
+                    font: "#F8FAFC",
+                    dashed: false,
+                }
+            } else {
+                NodeColors {
+                    fill: "#1E293B",
+                    border: "#475569",
+                    font: "#94A3B8",
+                    dashed: false,
+                }
+            };
+            return (label_parts, colors, false, false, false);
         }
 
         if !self.refs.is_empty() {
-            let mut local_branches = HashSet::new();
-            let mut remote_branches = HashMap::new();
+            let mut local_branches = BTreeSet::new();
+            let mut remote_branches: HashMap<String, String> = HashMap::new();
             let mut other_refs = Vec::new();
 
             for r in &self.refs {
                 if r.starts_with("refs/heads/") {
-                    local_branches.insert(r.trim_start_matches("refs/heads/").to_string());
+                    let branch_name = r.trim_start_matches("refs/heads/").to_string();
+                    if primary_branch.is_none() {
+                        primary_branch = Some(branch_name.clone());
+                    }
+                    local_branches.insert(branch_name);
                     has_local_branch = true;
                 } else if r.starts_with("refs/remotes/") {
                     let remote_ref = r.trim_start_matches("refs/remotes/");
                     if let Some((remote, branch)) = remote_ref.split_once('/') {
+                        if primary_branch.is_none() {
+                            primary_branch = Some(branch.to_string());
+                        }
                         remote_branches.insert(branch.to_string(), remote.to_string());
                     }
                     has_remote_branch = true;
                 } else {
-                    other_refs.push(format!("📍 {}", r.trim_start_matches("refs/")));
+                    other_refs.push(r.trim_start_matches("refs/").to_string());
                     has_other_refs = true;
                 }
             }
@@ -134,18 +211,18 @@ impl CommitNode {
 
             for lb in &local_branches {
                 if let Some(rn) = remote_branches.get(lb) {
-                    ref_parts.push(format!("🌿🌐 {} ({})", lb, rn));
+                    ref_parts.push(format!("{} [{}]", lb, rn));
                     processed.insert(lb.clone());
                 }
             }
             for lb in &local_branches {
                 if !processed.contains(lb) {
-                    ref_parts.push(format!("🌿 {}", lb));
+                    ref_parts.push(lb.clone());
                 }
             }
             for (branch, remote) in &remote_branches {
                 if !local_branches.contains(branch) {
-                    ref_parts.push(format!("🌐 {}/{}", remote, branch));
+                    ref_parts.push(format!("{}/{}", remote, branch));
                 }
             }
             ref_parts.extend(other_refs);
@@ -159,73 +236,77 @@ impl CommitNode {
             let tags_str = self
                 .tags
                 .iter()
-                .map(|t| format!("🏷️ {}", t.trim_start_matches("refs/tags/")))
+                .map(|t| t.trim_start_matches("refs/tags/").to_string())
                 .collect::<Vec<_>>()
                 .join("\\n");
             label_parts.push(tags_str);
         }
 
-        if self.is_current_checkout {
-            color = "\"#fff9c4\"";
-        } else if has_local_branch {
-            color = "\"#e3f2fd\"";
-        } else if has_other_refs {
-            color = "\"#fff3e0\"";
-        } else if has_remote_branch {
-            color = "\"#e8f5e8\"";
+        let colors = if has_local_branch || has_remote_branch {
+            branch_style(primary_branch.as_deref().unwrap_or(""))
         } else if !self.tags.is_empty() {
-            color = "\"#fce4ec\"";
-        }
+            NodeColors {
+                fill: "#0F172A",
+                border: "#94A3B8",
+                font: "#CBD5E1",
+                dashed: true,
+            }
+        } else if has_other_refs {
+            NodeColors {
+                fill: "#334155",
+                border: "#64748B",
+                font: "#CBD5E1",
+                dashed: false,
+            }
+        } else {
+            NodeColors {
+                fill: "#1E293B",
+                border: "#475569",
+                font: "#94A3B8",
+                dashed: false,
+            }
+        };
 
         (
             label_parts,
-            color,
+            colors,
             has_local_branch,
             has_remote_branch,
             has_other_refs,
         )
     }
 
-    /// Standard (0–1 predecessor) rendering — existing appearance.
+    /// Single-predecessor rendering.
     #[allow(clippy::too_many_arguments)]
     fn get_dot_node_standard(
         &self,
         url: Option<&str>,
         tooltip: Option<&str>,
         label_parts: &[String],
-        color: &str,
+        colors: &NodeColors,
         has_local_branch: bool,
         has_remote_branch: bool,
-        has_other_refs: bool,
+        _has_other_refs: bool,
     ) -> String {
         let mut label = label_parts.join("\\n");
 
         if self.is_current_checkout {
-            label = format!("➤ {}", label);
-        }
-        if self.is_tip {
-            label = format!("{} ⭐", label);
+            label = format!("CURRENT\\n{}", label);
         }
         if let Some(readme) = &self.branch_readme {
-            label = format!("{}\\n📄 {}", label, readme);
+            label = format!("{}\\n{}", label, readme);
         }
 
-        let shape = if has_local_branch || has_remote_branch {
-            "box"
-        } else if has_other_refs {
-            "house"
-        } else if !self.tags.is_empty() {
-            "octagon"
+        let style = if colors.dashed {
+            "dashed,filled"
+        } else if has_local_branch || has_remote_branch {
+            "rounded,filled"
         } else {
-            "box"
+            "filled"
         };
 
-        let penwidth = if self.is_current_checkout { 3 } else { 0 };
-        let border_color = if self.is_current_checkout {
-            "\"#f57f17\""
-        } else {
-            "\"#2c3e50\""
-        };
+        let penwidth = if self.is_current_checkout { 2 } else { 1 };
+        let font_size: u8 = if colors.dashed { 8 } else { 9 };
 
         let url_attr = url.map_or(String::new(), |u| {
             format!(", URL=\"{}\", target=\"_blank\"", u)
@@ -239,63 +320,54 @@ impl CommitNode {
         });
 
         format!(
-            "\"{}\" [label=\"{}\", shape={}, style=\"rounded,filled,bold\", color={}, fillcolor={}, fontname=\"Arial\", fontsize=8, fontcolor=\"#2c3e50\", penwidth={}, width=0.8, height=0.5{}{}]",
-            self.id, label, shape, border_color, color, penwidth, url_attr, tooltip_attr
+            "\"{}\" [label=\"{}\", shape=box, style=\"{}\", color=\"{}\", fillcolor=\"{}\", fontname=\"Arial\", fontsize={}, fontcolor=\"{}\", penwidth={}, width=0.9, height=0.4{}{}]",
+            self.id, label, style, colors.border, colors.fill, font_size, colors.font, penwidth, url_attr, tooltip_attr
         )
     }
 
     /// Multi-predecessor rendering using an HTML-label table.
-    /// Top row: node identity (refs/tags). Bottom row: one cell per predecessor.
     fn get_dot_node_html(
         &self,
         predecessors: &[PredecessorInfo],
         label_parts: &[String],
-        color: &str,
+        colors: &NodeColors,
         has_local_branch: bool,
         has_remote_branch: bool,
     ) -> String {
-        // Strip surrounding quotes from color for use as HTML attribute value.
-        let bgcolor = color.trim_matches('"');
-        let penwidth = if self.is_current_checkout { 3 } else { 1 };
-        let border_color = if self.is_current_checkout {
-            "#f57f17"
-        } else {
-            "#2c3e50"
-        };
-
+        let penwidth = if self.is_current_checkout { 2 } else { 1 };
         let col_count = predecessors.len();
 
-        // Build top-row identity text (HTML-escape, newlines → <BR/>).
         let mut identity = label_parts.join("\n");
         if self.is_current_checkout {
-            identity = format!("➤ {}", identity);
-        }
-        if self.is_tip {
-            identity = format!("{} ⭐", identity);
+            identity = format!("CURRENT\n{}", identity);
         }
         if let Some(readme) = &self.branch_readme {
-            identity = format!("{}\n📄 {}", identity, readme);
+            identity = format!("{}\n{}", identity, readme);
         }
         let identity_html = html_escape(&identity).replace('\n', "<BR/>");
 
-        // Top-row cell style.
         let header_style = if has_local_branch || has_remote_branch {
             format!(
                 "BORDER=\"{}\" COLOR=\"{}\" BGCOLOR=\"{}\" STYLE=\"ROUNDED\"",
-                penwidth, border_color, bgcolor
+                penwidth, colors.border, colors.fill
+            )
+        } else if colors.dashed {
+            format!(
+                "BORDER=\"{}\" COLOR=\"{}\" BGCOLOR=\"{}\" STYLE=\"DASHED\"",
+                penwidth, colors.border, colors.fill
             )
         } else {
             format!(
                 "BORDER=\"{}\" COLOR=\"{}\" BGCOLOR=\"{}\"",
-                penwidth, border_color, bgcolor
+                penwidth, colors.border, colors.fill
             )
         };
 
         let mut html = format!(
             "<<TABLE BORDER=\"0\" CELLBORDER=\"0\" CELLSPACING=\"2\" CELLPADDING=\"4\">\
-             <TR><TD COLSPAN=\"{}\" {} ALIGN=\"CENTER\"><FONT FACE=\"Arial Bold\" POINT-SIZE=\"8\"><B>{}</B></FONT></TD></TR>\
+             <TR><TD COLSPAN=\"{}\" {} ALIGN=\"CENTER\"><FONT FACE=\"Arial Bold\" POINT-SIZE=\"9\" COLOR=\"{}\"><B>{}</B></FONT></TD></TR>\
              <TR>",
-            col_count, header_style, identity_html
+            col_count, header_style, colors.font, identity_html
         );
 
         for (i, pred) in predecessors.iter().enumerate() {
@@ -307,23 +379,22 @@ impl CommitNode {
                 format!(" TOOLTIP=\"{}\"", html_escape(t).replace('\n', "&#10;"))
             });
             html.push_str(&format!(
-                "<TD PORT=\"p{}\" BORDER=\"1\" COLOR=\"{}\" BGCOLOR=\"#dfe6ed\" ALIGN=\"CENTER\"{}{}>\
-                 <FONT FACE=\"Arial\" POINT-SIZE=\"7\">← {}</FONT></TD>",
-                i, border_color, href_attr, tooltip_attr, short
+                "<TD PORT=\"p{}\" BORDER=\"1\" COLOR=\"#334155\" BGCOLOR=\"#1E293B\" ALIGN=\"CENTER\"{}{}>\
+                 <FONT FACE=\"Arial\" POINT-SIZE=\"7\" COLOR=\"#94A3B8\">← {}</FONT></TD>",
+                i, href_attr, tooltip_attr, short
             ));
         }
 
         html.push_str("</TR></TABLE>>");
 
         format!(
-            "\"{}\" [label={}, shape=plaintext, fontname=\"Arial\", fontsize=8]",
+            "\"{}\" [label={}, shape=plaintext, fontname=\"Arial\", fontsize=9]",
             self.id, html
         )
     }
 }
 
 /// Strips the remote URL from git merge messages.
-/// "Merge branch 'X' of <url> into Y" → "Merge branch 'X' into Y"
 fn strip_merge_remote(msg: &str) -> String {
     if let Some(of_pos) = msg.find(" of ") {
         if let Some(into_offset) = msg[of_pos..].find(" into ") {
