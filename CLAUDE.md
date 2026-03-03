@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-GGV (Git Graph Visualizer) is a Rust CLI tool that generates Graphviz DOT files from Git repositories and optionally converts them to SVG images for visualization. The tool analyzes Git commit history, branches, and tags to create visual representations of the repository structure.
+GGV (Git Graph Visualizer) is a Rust CLI tool that generates Graphviz DOT files from Git repositories and converts them to SVG images for visualization. The tool analyzes Git commit history, branches, and tags to create a condensed visual representation showing only referenced commits (branch tips, tags, root, merge junctions).
 
 ## Development Commands
 
 ### Build and Run
 - `cargo build` - Build the project
-- `cargo run` - Run with default options (generates DOT file and SVG, opens SVG)
+- `cargo run` - Run with default options (generates SVG, opens it, deletes intermediate DOT file)
 - `cargo run -- --help` - Show CLI help
 - `cargo run -- --repo-path /path/to/repo --output custom.dot --no-show` - Run with custom options
 
@@ -29,49 +29,53 @@ Always run the complete quality check sequence:
 
 ### Core Components
 
-**Args Struct (`main.rs:13-27`)**
+**Args Struct (`main.rs`)**
 - CLI argument parsing using clap with derive macros
-- Key options: `repo_path`, `output` (DOT file), `show` (SVG generation, defaults to true)
+- Key options: `repo_path`, `output` (DOT file, default `ggv-<repo-name>.dot`), `no_show`, `filter`, `gitlab_url`
 
-**CommitNode (`main.rs:29-115`)**
-- Represents a Git commit with metadata (ID, message, timestamp, parents, tags)
-- Implements ordering by timestamp for topological sorting
-- Handles DOT node formatting with special markup for tags and branch tips
+**RefFilter (`main.rs`)**
+- Parses the `--filter` string (`b`=branches, `r`=remotes, `t`=tags, `h`=HEAD)
+- Controls which Git refs are included in the graph
 
-**GitGraphviz (`main.rs:117-299`)**
-- Main orchestration struct containing Git repository and special branch configuration
-- `generate_dot()` - Core method that walks branches, processes commits, and writes DOT format
-- `walk_branch()` - Traverses commit history using git2's revwalk
-- `add_tags_to_commits()` - Associates Git tags with their target commits
-- `write_subgraph()` - Creates Graphviz subgraphs for branch visualization
+**CommitNode (`main.rs`)**
+- Represents a Git commit with metadata (ID, message, timestamp, parents, tags, refs)
+- Handles DOT node formatting: shape, color, label, URL, and tooltip attributes
+- Color coding: yellow=current checkout, light blue=local branch, light green=remote, pink=tag, orange=other refs
 
-**Utility Functions (`main.rs:301-350`)**
-- `generate_svg()` - Uses `graphviz-rust` to convert DOT files to SVG format
-- `open_file()` - Cross-platform file opening (Windows: `cmd /C start`, macOS: `open`, Linux: `xdg-open`)
+**GitGraphviz (`main.rs`)**
+- Main orchestration struct holding the Repository, RefFilter, and optional GitLab base URL
+- `generate_dot()` — collects referenced commits, builds condensed graph, writes DOT file
+- `build_condensed_graph()` / `find_connection_path()` — adds merge-junction commits needed to maintain graph connectivity
+- `find_condensed_connections()` — traces the nearest condensed ancestor for each commit edge
+- `collect_path_commits()` — gathers commits between two nodes for hover tooltips
+- `add_tagged_commits()`, `add_root_commits()`, `add_branch_readmes()` — enrich commit nodes
+- `detect_gitlab_url()` / `parse_gitlab_remote_url()` — auto-detects GitLab base URL from the remote
+
+**Utility Functions (`main.rs`)**
+- `find_dot_executable()` — locates `dot.exe` by checking (in order): `GRAPHVIZ_DOT` env var, common Windows installation directories, then `where`/`which` fallback
+- `generate_svg()` — calls `dot.exe` directly via `std::process::Command -Tsvg`; prints the resolved path
+- `open_file()` — cross-platform file opening (Windows: `cmd /C start`, macOS: `open`, Linux: `xdg-open`)
+- `time_ago()` — human-readable relative timestamps for tooltips
+- `repo_name_from_path()` — derives the default output filename from the repository folder name
 
 ### Data Flow
 1. Parse CLI arguments and open Git repository using git2
-2. Walk all local branches to collect commits in HashMap (deduplication)
-3. Add Git tag associations to commits
-4. Mark branch tip commits for special visualization
-5. Generate DOT file with nodes (commits) and edges (parent relationships)
-6. If `--show` enabled: convert to SVG via graphviz-rust and open file
+2. Collect referenced commits for each enabled ref type (branches, remotes, tags, HEAD)
+3. Add root commits and tag associations; mark branch tips and current checkout
+4. Build condensed graph: keep only referenced commits plus necessary merge-junction commits
+5. Pre-compute condensed parent edges and GitLab compare URLs
+6. Write DOT file with styled nodes and edges
+7. Unless `--no-show`: call `dot.exe` to convert DOT → SVG, delete the DOT file, open SVG
 
 ### Dependencies
-- `git2` - Git repository access and commit traversal
-- `clap` with derive features - CLI argument parsing
-- `anyhow` - Error handling with context
-- `chrono` with serde - Date/time handling (imported but not actively used)
-- `graphviz-rust` - Pure Rust Graphviz implementation for DOT parsing and SVG generation
+- `git2` — Git repository access and commit traversal
+- `clap` with derive features — CLI argument parsing
+- `anyhow` — Error handling with context
+- `chrono` with serde — Date/time types
 
 ### External Requirements
-- Cross-platform file opening utilities (built into OS)
-- **No external Graphviz installation required** - uses `graphviz-rust` for pure Rust SVG generation
-
-### Special Branch Handling
-The tool prioritizes certain branches in subgraph generation:
-- `refs/heads/master`
-- `refs/heads/main` 
-- `refs/heads/integration`
-
-These are processed first in the DOT output for consistent visualization layout.
+- **Graphviz** must be installed (`dot.exe` / `dot`). GGV searches for it automatically:
+  - Checks `GRAPHVIZ_DOT` environment variable first
+  - Windows: tries `C:\Program Files\Graphviz\bin\dot.exe`, `C:\Program Files (x86)\Graphviz\bin\dot.exe`, `C:\Graphviz\bin\dot.exe`, then `where dot`
+  - macOS/Linux: uses `which dot`
+  - Install: `winget install --id Graphviz.Graphviz` (Windows) or `brew install graphviz` (macOS)
