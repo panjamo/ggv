@@ -58,7 +58,11 @@ pub fn find_dot_executable() -> Option<std::path::PathBuf> {
     None
 }
 
-pub fn generate_svg(dot_path: &str, forge_url: Option<&str>) -> Result<String> {
+pub fn generate_svg(
+    dot_path: &str,
+    forge_url: Option<&str>,
+    web_server_url: Option<&str>,
+) -> Result<String> {
     let dot_file = Path::new(dot_path);
     let svg_path = dot_file.with_extension("svg");
 
@@ -102,17 +106,30 @@ pub fn generate_svg(dot_path: &str, forge_url: Option<&str>) -> Result<String> {
     }
 
     let svg_path_str = svg_path.to_string_lossy().to_string();
-    inject_interactive_js(&svg_path_str, forge_url)?;
+    inject_interactive_js(&svg_path_str, forge_url, web_server_url)?;
     println!("Generated SVG file: {}", svg_path_str);
     Ok(svg_path_str)
 }
 
-fn inject_interactive_js(svg_path: &str, forge_url: Option<&str>) -> Result<()> {
+fn inject_interactive_js(
+    svg_path: &str,
+    forge_url: Option<&str>,
+    web_server_url: Option<&str>,
+) -> Result<()> {
     let content = std::fs::read_to_string(svg_path)
         .with_context(|| format!("Failed to read SVG: {}", svg_path))?;
 
     // Build the JS forge URL literal: "https://..." or null
     let forge_url_js = match forge_url {
+        Some(url) => {
+            let escaped = url.replace('\\', "\\\\").replace('"', "\\\"");
+            format!("\"{}\"", escaped)
+        }
+        None => "null".to_string(),
+    };
+
+    // Build the JS web server URL literal: "http://[::1]:PORT" or null
+    let ws_url_js = match web_server_url {
         Some(url) => {
             let escaped = url.replace('\\', "\\\\").replace('"', "\\\"");
             format!("\"{}\"", escaped)
@@ -231,11 +248,34 @@ window.addEventListener('load', function() {
     clearHL();
     drag = null;
   });
+  // Diff server: make edge count labels clickable
+  var wsUrl = WS_URL_PLACEHOLDER;
+  if (wsUrl) {
+    document.querySelectorAll('g.edge').forEach(function(g) {
+      var title = g.querySelector('title');
+      if (!title) return;
+      var m = title.textContent.match(/^([0-9a-f]{40})->([0-9a-f]{40})$/);
+      if (!m) return;
+      var fromSha = m[1], toSha = m[2];
+      g.querySelectorAll('text').forEach(function(t) {
+        if (!/^\d+$/.test(t.textContent.trim())) return;
+        t.style.cursor = 'pointer';
+        t.style.fill = '#60a5fa';
+        t.addEventListener('click', function(e) {
+          e.stopPropagation();
+          e.preventDefault();
+          window.open(wsUrl + '/diff?from=' + fromSha + '&to=' + toSha, '_blank');
+        });
+      });
+    });
+  }
 });
 //]]>
 </script>"#;
 
-    let script = script_template.replace("FORGE_URL_PLACEHOLDER", &forge_url_js);
+    let script = script_template
+        .replace("FORGE_URL_PLACEHOLDER", &forge_url_js)
+        .replace("WS_URL_PLACEHOLDER", &ws_url_js);
 
     // Inject script after the opening <svg ...> tag
     let modified = if let Some(svg_start) = content.find("<svg ") {

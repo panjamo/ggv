@@ -5,6 +5,7 @@ mod graph;
 mod graphviz;
 mod theme;
 mod utils;
+mod web_server;
 
 use anyhow::{Context, Result};
 use args::Args;
@@ -55,6 +56,14 @@ fn main() -> Result<()> {
         }
     });
 
+    let (server_handle, web_server_url) = if args.web_server {
+        let (handle, port) = web_server::start(args.web_port, args.repo_path.clone(), args.gia_browser, args.gia_prompt)
+            .context("Failed to start diff web server")?;
+        (Some(handle), Some(web_server::base_url(port)))
+    } else {
+        (None, None)
+    };
+
     let filter = RefFilter::from_string(&args.filter);
     let git_viz = GitGraphviz::new(
         &args.repo_path,
@@ -67,12 +76,16 @@ fn main() -> Result<()> {
     git_viz.generate_dot(&output)?;
 
     if !args.no_show {
-        let svg_path = generate_svg(&output, git_viz.forge_url())?;
+        let svg_path = generate_svg(&output, git_viz.forge_url(), web_server_url.as_deref())?;
         if !args.keep_dot {
             std::fs::remove_file(&output)
                 .with_context(|| format!("Failed to delete DOT file: {}", output))?;
         }
         open_file(&svg_path)?;
+    }
+
+    if let Some(handle) = server_handle {
+        handle.join().ok();
     }
 
     Ok(())
