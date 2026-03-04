@@ -16,11 +16,11 @@ use utils::repo_name_from_path;
 
 fn fetch_tags(repo_path: &str) -> Result<()> {
     let status = std::process::Command::new("git")
-        .args(["-C", repo_path, "fetch", "--tags"])
+        .args(["-C", repo_path, "fetch", "--tags", "--prune"])
         .status()
-        .context("Failed to run 'git fetch --tags'")?;
+        .context("Failed to run 'git fetch --tags --prune'")?;
     if !status.success() {
-        eprintln!("Warning: 'git fetch --tags' exited with status {}", status);
+        eprintln!("Warning: 'git fetch --tags --prune' exited with status {}", status);
     }
     Ok(())
 }
