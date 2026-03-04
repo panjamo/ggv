@@ -7,7 +7,7 @@ use std::io::{BufWriter, Write};
 use crate::commit_node::CommitNode;
 use crate::filter::RefFilter;
 use crate::theme::Theme;
-use crate::utils::time_ago;
+use crate::utils::{repo_name_from_path, time_ago};
 
 pub struct GitGraphviz {
     repo: Repository,
@@ -264,9 +264,14 @@ impl GitGraphviz {
             "  edge [color=\"{}\", penwidth=1.5, arrowsize=0.7, arrowhead=vee];",
             tc.edge_color
         )?;
+        let graph_tooltip = build_graph_tooltip(&self.repo)
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n");
         writeln!(
             writer,
-            "  graph [splines=ortho, nodesep=0.4, ranksep=0.5, pad=\"0.5,0.5\"];"
+            "  graph [splines=ortho, nodesep=0.4, ranksep=0.5, pad=\"0.5,0.5\", tooltip=\"{}\"];",
+            graph_tooltip
         )?;
 
         // Write all nodes
@@ -681,6 +686,45 @@ fn url_encode_ref(r: &str) -> String {
         }
     }
     out
+}
+
+fn build_graph_tooltip(repo: &Repository) -> String {
+    let repo_path = repo
+        .workdir()
+        .and_then(|p| p.to_str())
+        .unwrap_or("")
+        .trim_end_matches(['/', '\\']);
+    let repo_name = repo_name_from_path(repo_path);
+
+    let mut lines = vec![format!("Repository: {}", repo_name)];
+
+    if let Ok(head) = repo.head() {
+        let branch = if head.is_branch() {
+            head.shorthand().unwrap_or("unknown").to_string()
+        } else {
+            "detached HEAD".to_string()
+        };
+        lines.push(format!("Branch: {}", branch));
+
+        if let Some(oid) = head.target() {
+            if let Ok(commit) = repo.find_commit(oid) {
+                let short_id = oid.to_string()[..7].to_string();
+                let msg = commit
+                    .summary()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                let author = commit.author();
+                let author_name = author.name().unwrap_or("unknown");
+                let when = time_ago(commit.time().seconds());
+                lines.push(format!("Commit:  {} {}", short_id, msg));
+                lines.push(format!("Author:  {}", author_name));
+                lines.push(format!("Date:    {}", when));
+            }
+        }
+    }
+
+    lines.join("\n")
 }
 
 fn build_tooltip(path_commits: &[(String, String, String, String)]) -> Option<String> {

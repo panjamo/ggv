@@ -4,18 +4,25 @@ pub fn time_ago(timestamp: i64) -> String {
         .unwrap_or_default()
         .as_secs() as i64;
     let diff = now - timestamp;
+    let plural = |n: i64, unit: &str| {
+        if n == 1 {
+            format!("1 {} ago", unit)
+        } else {
+            format!("{} {}s ago", n, unit)
+        }
+    };
     if diff < 60 {
-        format!("{} seconds ago", diff)
+        plural(diff, "second")
     } else if diff < 3600 {
-        format!("{} minutes ago", diff / 60)
+        plural(diff / 60, "minute")
     } else if diff < 86400 {
-        format!("{} hours ago", diff / 3600)
+        plural(diff / 3600, "hour")
     } else if diff < 86400 * 30 {
-        format!("{} days ago", diff / 86400)
+        plural(diff / 86400, "day")
     } else if diff < 86400 * 365 {
-        format!("{} months ago", diff / (86400 * 30))
+        plural(diff / (86400 * 30), "month")
     } else {
-        format!("{} years ago", diff / (86400 * 365))
+        plural(diff / (86400 * 365), "year")
     }
 }
 
