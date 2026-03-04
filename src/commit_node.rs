@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 
 use crate::theme::Theme;
 
@@ -166,39 +166,22 @@ impl CommitNode {
             }
 
             let mut ref_parts = Vec::new();
-            let mut processed = HashSet::new();
 
             for lb in &local_branches {
-                if let Some(rn) = remote_branches.get(lb) {
-                    ref_parts.push(format!("{} [{}]", lb, rn));
-                    processed.insert(lb.clone());
-                }
-            }
-            for lb in &local_branches {
-                if !processed.contains(lb) {
-                    ref_parts.push(lb.clone());
-                }
+                ref_parts.push(lb.clone());
             }
             for (branch, remote) in &remote_branches {
-                if !local_branches.contains(branch) {
-                    ref_parts.push(format!("{}/{}", remote, branch));
-                }
+                ref_parts.push(format!("{}/{}", remote, branch));
             }
             ref_parts.extend(other_refs);
 
-            if !ref_parts.is_empty() {
-                label_parts.push(ref_parts.join("\\n"));
-            }
+            label_parts.extend(ref_parts);
         }
 
         if !self.tags.is_empty() {
-            let tags_str = self
-                .tags
-                .iter()
-                .map(|t| t.trim_start_matches("refs/tags/").to_string())
-                .collect::<Vec<_>>()
-                .join("\\n");
-            label_parts.push(tags_str);
+            for t in &self.tags {
+                label_parts.push(t.trim_start_matches("refs/tags/").to_string());
+            }
         }
 
         let colors = if has_local_branch || has_remote_branch {
