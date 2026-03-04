@@ -15,7 +15,8 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **Current-Branch View**: `--current-branch` hides all refs not on the ancestry path of HEAD — shows only what is reachable from the current checkout
 - **Subtree View**: Limit the graph to a specific commit and all its descendants (`--from`)
 - **Forge Integration**: Clickable graph edges linking to GitLab or GitHub compare views, with hover tooltips showing the condensed commits — auto-detected from the remote URL. Ref names are URL-encoded. GitHub links use commit SHAs for reliability.
-- **SHA Copy**: Click any commit node to copy its full SHA to the clipboard (amber flash confirms the copy)
+- **Drag-to-Compare**: Drag any commit node onto another to open a GitLab or GitHub compare view for that arbitrary range — order is corrected automatically (always `older...newer` regardless of drag direction). Requires a forge URL (auto-detected or via `--gitlab-url`).
+- **SHA Copy**: Click any commit node to copy its full 40-character SHA to the clipboard (amber border flash confirms the copy). Nodes show a grab cursor when drag-to-compare is available.
 - **Graph Tooltip**: Hover the SVG background to see the repository name, current branch, HEAD commit, author, and date
 - **Cross-Platform**: Works on Windows, macOS, and Linux
 
@@ -217,10 +218,18 @@ Branch nodes are rounded rectangles, color-coded by name. Two built-in themes ar
 | Edges | `#475569` | `#CBD5E1` |
 
 Each branch and remote-tracking ref is shown on its own line (e.g. `main` and `origin/main` as separate entries).
-Hovering an edge shows a tooltip listing the commits condensed into that range.
-Clicking an edge (in a browser) opens the GitLab or GitHub compare view for that range.
-Clicking a commit node copies its full 40-character SHA to the clipboard; the node border flashes amber to confirm.
-Hovering the SVG background shows a tooltip with the repository name, current branch, HEAD commit, author, and date.
+
+**SVG interactions** (open the SVG in a browser):
+
+| Interaction | Result |
+|-------------|--------|
+| Hover an edge | Tooltip listing the commits condensed into that range |
+| Click an edge | Opens the GitLab or GitHub compare view for that range |
+| Click a commit node | Copies the full 40-character SHA to the clipboard; border flashes amber to confirm |
+| Drag one commit node onto another | Opens the GitLab or GitHub compare view for that arbitrary range — order is always `older...newer` regardless of drag direction |
+| Hover the SVG background | Tooltip with repository name, current branch, HEAD commit, author, and date |
+
+Drag-to-compare requires a forge URL (auto-detected from the remote, or set via `--gitlab-url`). When available, commit nodes show a grab cursor to indicate they are draggable.
 
 ## Development
 

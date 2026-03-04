@@ -248,7 +248,7 @@ impl CommitNode {
         if let Some(readme) = &self.branch_readme {
             let escaped_readme = readme
                 .split("\\n")
-                .map(|line| dot_escape(line))
+                .map(dot_escape)
                 .collect::<Vec<_>>()
                 .join("\\n");
             label = format!("{}\\n{}", label, escaped_readme);

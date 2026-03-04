@@ -58,7 +58,7 @@ pub fn find_dot_executable() -> Option<std::path::PathBuf> {
     None
 }
 
-pub fn generate_svg(dot_path: &str) -> Result<String> {
+pub fn generate_svg(dot_path: &str, forge_url: Option<&str>) -> Result<String> {
     let dot_file = Path::new(dot_path);
     let svg_path = dot_file.with_extension("svg");
 
@@ -102,17 +102,29 @@ pub fn generate_svg(dot_path: &str) -> Result<String> {
     }
 
     let svg_path_str = svg_path.to_string_lossy().to_string();
-    inject_clipboard_js(&svg_path_str)?;
+    inject_interactive_js(&svg_path_str, forge_url)?;
     println!("Generated SVG file: {}", svg_path_str);
     Ok(svg_path_str)
 }
 
-fn inject_clipboard_js(svg_path: &str) -> Result<()> {
+fn inject_interactive_js(svg_path: &str, forge_url: Option<&str>) -> Result<()> {
     let content = std::fs::read_to_string(svg_path)
         .with_context(|| format!("Failed to read SVG: {}", svg_path))?;
 
-    let script = r#"<script type="text/ecmascript">
+    // Build the JS forge URL literal: "https://..." or null
+    let forge_url_js = match forge_url {
+        Some(url) => {
+            let escaped = url.replace('\\', "\\\\").replace('"', "\\\"");
+            format!("\"{}\"", escaped)
+        }
+        None => "null".to_string(),
+    };
+
+    // FORGE_URL_PLACEHOLDER is replaced at runtime with the actual JS value
+    let script_template = r#"<script type="text/ecmascript">
+//<![CDATA[
 function copyHash(el) {
+  if (window._dragJustHappened) { window._dragJustHappened = false; return; }
   var t = el.querySelector('title');
   if (!t) return;
   var sha = t.textContent.trim();
@@ -125,20 +137,116 @@ function copyHash(el) {
     });
   });
 }
-// Offset edge count labels away from the edge line
 window.addEventListener('load', function() {
+  // Offset edge count labels away from the edge line
   document.querySelectorAll('g.edge text').forEach(function(t) {
     var x = parseFloat(t.getAttribute('x') || 0);
     t.setAttribute('x', x + 10);
   });
+  // Drag-to-compare: drag one node onto another to open the forge compare view
+  var forgeUrl = FORGE_URL_PLACEHOLDER;
+  if (!forgeUrl) return;
+  // Switch nodes to grab cursor to signal draggability
+  document.querySelectorAll('g.node').forEach(function(g) { g.style.cursor = 'grab'; });
+  var drag = null;
+  var hlTarget = null, hlStrokes = [];
+  function clearHL() {
+    if (!hlTarget) return;
+    hlTarget.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s, i) {
+      if (hlStrokes[i] !== undefined) s.setAttribute('stroke', hlStrokes[i]);
+    });
+    hlTarget = null; hlStrokes = [];
+  }
+  function setHL(g) {
+    clearHL(); hlTarget = g;
+    g.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s) {
+      hlStrokes.push(s.getAttribute('stroke') || '');
+      s.setAttribute('stroke', '#3B82F6');
+    });
+  }
+  function nodeAt(x, y, skip) {
+    var els = document.elementsFromPoint(x, y);
+    for (var i = 0; i < els.length; i++) {
+      var g = els[i].closest && els[i].closest('g.node');
+      if (g && g !== skip) return g;
+    }
+    return null;
+  }
+  document.querySelectorAll('g.node').forEach(function(g) {
+    g.addEventListener('pointerdown', function(e) {
+      if (e.button !== 0) return;
+      var t = g.querySelector('title');
+      if (!t) return;
+      var sha = t.textContent.trim();
+      if (!/^[0-9a-f]{40}$/.test(sha)) return;
+      drag = {sha: sha, el: g, x0: e.clientX, y0: e.clientY, moved: false};
+      e.preventDefault();
+    });
+  });
+  document.addEventListener('pointermove', function(e) {
+    if (!drag) return;
+    var dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+    if (!drag.moved && Math.sqrt(dx*dx + dy*dy) > 6) {
+      drag.moved = true;
+      drag.el.style.opacity = '0.5';
+      document.documentElement.style.cursor = 'crosshair';
+    }
+    if (drag.moved) {
+      var target = nodeAt(e.clientX, e.clientY, drag.el);
+      if (target) setHL(target); else clearHL();
+    }
+  });
+  document.addEventListener('pointerup', function(e) {
+    if (!drag) return;
+    var wasMoved = drag.moved;
+    drag.el.style.opacity = '';
+    document.documentElement.style.cursor = '';
+    clearHL();
+    if (wasMoved) {
+      window._dragJustHappened = true;
+      var target = nodeAt(e.clientX, e.clientY, drag.el);
+      if (target) {
+        var t = target.querySelector('title');
+        if (t) {
+          var tsha = t.textContent.trim();
+          if (/^[0-9a-f]{40}$/.test(tsha)) {
+            var seg = forgeUrl.indexOf('github.com') >= 0 ? '/compare/' : '/-/compare/';
+            // In a BT graph, nodes lower on screen are older commits.
+            // Always build the URL as older...newer regardless of drag direction.
+            var dragY = drag.el.getBoundingClientRect().top;
+            var targetY = target.getBoundingClientRect().top;
+            var fromSha = dragY > targetY ? drag.sha : tsha;
+            var toSha   = dragY > targetY ? tsha : drag.sha;
+            window.open(forgeUrl + seg + fromSha + '...' + toSha, '_blank');
+          }
+        }
+      }
+    }
+    drag = null;
+  });
+  document.addEventListener('pointercancel', function() {
+    if (!drag) return;
+    drag.el.style.opacity = '';
+    document.documentElement.style.cursor = '';
+    clearHL();
+    drag = null;
+  });
 });
+//]]>
 </script>"#;
+
+    let script = script_template.replace("FORGE_URL_PLACEHOLDER", &forge_url_js);
 
     // Inject script after the opening <svg ...> tag
     let modified = if let Some(svg_start) = content.find("<svg ") {
         if let Some(tag_end) = content[svg_start..].find('>') {
             let insert_at = svg_start + tag_end + 1;
-            format!("{}\n{}\n{}", &content[..insert_at], script, &content[insert_at..])
+            format!(
+                "{}\n{}\n{}",
+                &content[..insert_at],
+                script,
+                &content[insert_at..]
+            )
         } else {
             content
         }

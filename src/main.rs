@@ -20,7 +20,10 @@ fn fetch_tags(repo_path: &str) -> Result<()> {
         .status()
         .context("Failed to run 'git fetch --tags --prune'")?;
     if !status.success() {
-        eprintln!("Warning: 'git fetch --tags --prune' exited with status {}", status);
+        eprintln!(
+            "Warning: 'git fetch --tags --prune' exited with status {}",
+            status
+        );
     }
     Ok(())
 }
@@ -64,7 +67,7 @@ fn main() -> Result<()> {
     git_viz.generate_dot(&output)?;
 
     if !args.no_show {
-        let svg_path = generate_svg(&output)?;
+        let svg_path = generate_svg(&output, git_viz.forge_url())?;
         if !args.keep_dot {
             std::fs::remove_file(&output)
                 .with_context(|| format!("Failed to delete DOT file: {}", output))?;

@@ -54,6 +54,10 @@ impl GitGraphviz {
         })
     }
 
+    pub fn forge_url(&self) -> Option<&str> {
+        self.gitlab_base_url.as_deref()
+    }
+
     fn parse_gitlab_remote_url(url: &str) -> Option<String> {
         if let Some(rest) = url.strip_prefix("git@") {
             if let Some((host, path)) = rest.split_once(':') {
@@ -157,11 +161,7 @@ impl GitGraphviz {
             match head_oid {
                 None => true,
                 Some(head) => {
-                    oid == head
-                        || self
-                            .repo
-                            .graph_descendant_of(head, oid)
-                            .unwrap_or(false)
+                    oid == head || self.repo.graph_descendant_of(head, oid).unwrap_or(false)
                 }
             }
         };
@@ -335,7 +335,11 @@ impl GitGraphviz {
                     } else {
                         commit.best_ref_for_url()
                     };
-                    let compare_segment = if is_github { "/compare/" } else { "/-/compare/" };
+                    let compare_segment = if is_github {
+                        "/compare/"
+                    } else {
+                        "/-/compare/"
+                    };
                     format!(
                         "{}{}{}...{}",
                         base,
@@ -755,11 +759,7 @@ fn build_graph_tooltip(repo: &Repository) -> String {
         if let Some(oid) = head.target() {
             if let Ok(commit) = repo.find_commit(oid) {
                 let short_id = oid.to_string()[..7].to_string();
-                let msg = commit
-                    .summary()
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
+                let msg = commit.summary().unwrap_or("").trim().to_string();
                 let author = commit.author();
                 let author_name = author.name().unwrap_or("unknown");
                 let when = time_ago(commit.time().seconds());
@@ -816,10 +816,7 @@ fn build_edge_attrs(url: Option<&str>, tooltip: Option<&str>, count: usize) -> S
         format!("tooltip=\"{}\"", escaped)
     });
     let label_part = if count > 0 {
-        format!(
-            "xlabel=\"{}\", fontsize=8, fontcolor=\"#94A3B8\"",
-            count
-        )
+        format!("xlabel=\"{}\", fontsize=8, fontcolor=\"#94A3B8\"", count)
     } else {
         String::new()
     };
