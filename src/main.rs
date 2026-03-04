@@ -57,8 +57,14 @@ fn main() -> Result<()> {
     });
 
     let (server_handle, web_server_url) = if args.web_server {
-        let (handle, port) = web_server::start(args.web_port, args.repo_path.clone(), args.gia_browser, args.gia_prompt)
-            .context("Failed to start diff web server")?;
+        let (handle, port) = web_server::start(
+            args.web_port,
+            args.repo_path.clone(),
+            args.use_ai,
+            args.gia_browser,
+            args.gia_prompt,
+        )
+        .context("Failed to start diff web server")?;
         (Some(handle), Some(web_server::base_url(port)))
     } else {
         (None, None)

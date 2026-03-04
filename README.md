@@ -18,7 +18,7 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **Drag-to-Compare**: Drag any commit node onto another to open a GitLab or GitHub compare view for that arbitrary range — order is corrected automatically (always `older...newer`)
 - **SHA Copy**: Click any commit node to copy its full 40-character SHA to the clipboard (amber border flash confirms)
 - **Graph Tooltip**: Hover the SVG background to see the repository name, current branch, HEAD commit, author, and date
-- **AI Diff Server**: Start a local web server (`-w`) that runs `git diff | gia` when you click an edge count label — shows an AI-generated summary in the browser
+- **AI Diff Server**: Start a local web server (`-w`) that opens `git difftool` (default) or runs `git diff | gia` for an AI-generated summary (`-a`) when you click an edge count label
 - **Cross-Platform**: Works on Windows, macOS, and Linux
 
 ## Prerequisites
@@ -41,7 +41,7 @@ A Rust CLI tool that generates visual representations of Git repository structur
   set GRAPHVIZ_DOT=C:\MyTools\Graphviz\bin\dot.exe
   ```
 
-- **gia** (optional): Required for the AI diff server (`-w`). Must be available in `PATH`.
+- **gia** (optional): Required for AI diff summaries (`-w -a`). Must be available in `PATH`.
   See [github.com/panjamo/gia](https://github.com/panjamo/gia).
 
 ![Sample Git Graph](doc/sample.png)
@@ -78,8 +78,9 @@ Options:
   -k, --keep-dot            Keep the intermediate DOT file after SVG generation
   -t, --theme <THEME>       Color theme: dark or light [default: light]
   -c, --current-branch      Show only refs that are ancestors of HEAD
-  -w, --web-server          Start the AI diff server (requires gia in PATH)
+  -w, --web-server          Start the diff web server
   -P, --web-port <PORT>     Port for the diff server (0 = OS-assigned) [default: 0]
+  -a, --use-ai              Use AI (gia) to summarize diffs; without this, opens git difftool
   -b, --gia-browser         Pass -b to gia — gia opens its own browser window
   -p, --gia-prompt <TEXT>   Custom prompt passed to gia (overrides built-in default)
   -h, --help                Print help
@@ -163,12 +164,20 @@ Combine subtree with current-branch view:
 ggv -F v1.0.0 -c
 ```
 
-### AI Diff Server
+### Diff Web Server
 
-Start the diff server alongside the graph. Clicking the blue edge count label runs `git diff | gia` and shows an AI summary in the browser:
+Start the diff server alongside the graph. Clicking the blue edge count label triggers the configured diff action.
+
+**Default (no `--use-ai`)** — opens `git difftool -d sha1 sha2` in your configured diff tool and returns an empty page:
 
 ```bash
 ggv -w
+```
+
+**With `--use-ai` (`-a`)** — runs `git diff | gia` and shows an AI summary in the browser:
+
+```bash
+ggv -w -a
 ```
 
 Use a fixed port (useful when the SVG will be reopened later):
@@ -180,19 +189,19 @@ ggv -w -P 8080
 Let gia open its own browser window instead of the built-in summary page:
 
 ```bash
-ggv -w -b
+ggv -w -a -b
 ```
 
 Use a custom prompt:
 
 ```bash
-ggv -w -p "list the changed files and explain each change in one sentence"
+ggv -w -a -p "list the changed files and explain each change in one sentence"
 ```
 
 Combined:
 
 ```bash
-ggv -w -b -p "summarize in three bullet points"
+ggv -w -a -b -p "summarize in three bullet points"
 ```
 
 The process stays alive after the SVG is opened, serving requests until Ctrl+C. Each `ggv -w` instance gets its own OS-assigned port, so multiple instances can run simultaneously.
@@ -246,12 +255,12 @@ Open the SVG in a browser to use all interactive features:
 |-------------|--------|
 | Hover an edge | Tooltip listing commits condensed into that range |
 | Click an edge | Opens the GitLab / GitHub compare view for that range |
-| Click the blue edge count label | Opens the AI diff summary page (requires `-w`) |
+| Click the blue edge count label | Opens `git difftool` (default) or AI summary page (with `-w -a`) |
 | Click a commit node | Copies the full 40-character SHA to the clipboard (amber flash confirms) |
 | Drag one commit node onto another | Opens the forge compare view for that range — always `older...newer` |
 | Hover the SVG background | Tooltip with repository name, branch, HEAD commit, author, and date |
 
-Drag-to-compare requires a forge URL (auto-detected or set via `-g`). The blue edge count labels are only active when `-w` is used.
+Drag-to-compare requires a forge URL (auto-detected or set via `-g`). The blue edge count labels are only active when `-w` is used. Add `-a` to get an AI summary instead of opening the difftool.
 
 ## Development
 

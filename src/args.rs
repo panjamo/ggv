@@ -91,6 +91,14 @@ pub struct Args {
     pub web_port: u16,
 
     #[arg(
+        short = 'a',
+        long,
+        help = "Use AI (gia) to summarize the diff; if omitted, opens git difftool instead",
+        action = clap::ArgAction::SetTrue
+    )]
+    pub use_ai: bool,
+
+    #[arg(
         short = 'b',
         long,
         help = "Pass -b to gia so it opens its own browser window instead of returning text",

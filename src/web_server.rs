@@ -21,6 +21,7 @@ pub fn base_url(port: u16) -> String {
 pub fn start(
     port: u16,
     repo_path: String,
+    use_ai: bool,
     gia_browser: bool,
     prompt: Option<String>,
 ) -> anyhow::Result<(std::thread::JoinHandle<()>, u16)> {
@@ -31,18 +32,25 @@ pub fn start(
         "Diff server listening on http://[::1]:{} (Ctrl+C to stop)",
         actual_port
     );
-    let handle = std::thread::spawn(move || run_server(listener, &repo_path, gia_browser, prompt));
+    let handle =
+        std::thread::spawn(move || run_server(listener, &repo_path, use_ai, gia_browser, prompt));
     Ok((handle, actual_port))
 }
 
-fn run_server(listener: TcpListener, repo_path: &str, gia_browser: bool, prompt: Option<String>) {
+fn run_server(
+    listener: TcpListener,
+    repo_path: &str,
+    use_ai: bool,
+    gia_browser: bool,
+    prompt: Option<String>,
+) {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
                 let repo_clone = repo_path.to_string();
                 let prompt_clone = prompt.clone();
                 std::thread::spawn(move || {
-                    handle_connection(stream, &repo_clone, gia_browser, prompt_clone)
+                    handle_connection(stream, &repo_clone, use_ai, gia_browser, prompt_clone)
                 });
             }
             Err(e) => eprintln!("Connection error: {}", e),
@@ -53,6 +61,7 @@ fn run_server(listener: TcpListener, repo_path: &str, gia_browser: bool, prompt:
 fn handle_connection(
     mut stream: TcpStream,
     repo_path: &str,
+    use_ai: bool,
     gia_browser: bool,
     prompt: Option<String>,
 ) {
@@ -108,6 +117,12 @@ fn handle_connection(
         }
     };
 
+    if !use_ai {
+        run_git_difftool(repo_path, &sha1, &sha2);
+        send_response(&mut stream, 200, "text/html; charset=utf-8", "");
+        return;
+    }
+
     let effective_prompt = prompt.as_deref();
     if gia_browser {
         run_gia_browser(repo_path, &sha1, &sha2, effective_prompt);
@@ -140,6 +155,12 @@ fn parse_query(query: &str) -> HashMap<String, String> {
         }
     }
     map
+}
+
+fn run_git_difftool(repo_path: &str, sha1: &str, sha2: &str) {
+    let _ = std::process::Command::new("git")
+        .args(["-C", repo_path, "difftool", "-d", sha1, sha2])
+        .spawn();
 }
 
 fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) {
