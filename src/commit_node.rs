@@ -246,7 +246,12 @@ impl CommitNode {
             label = format!("CURRENT\\n{}", label);
         }
         if let Some(readme) = &self.branch_readme {
-            label = format!("{}\\n{}", label, dot_escape(readme));
+            let escaped_readme = readme
+                .split("\\n")
+                .map(|line| dot_escape(line))
+                .collect::<Vec<_>>()
+                .join("\\n");
+            label = format!("{}\\n{}", label, escaped_readme);
         }
 
         let style = if colors.dashed {
