@@ -114,7 +114,7 @@ impl CommitNode {
             if let Some(summary) = self._message.lines().next() {
                 let summary = summary.trim();
                 if !summary.is_empty() {
-                    label_parts.push(strip_merge_remote(summary));
+                    label_parts.extend(format_commit_summary(&strip_merge_remote(summary)));
                 }
             }
             let colors = if self.is_current_checkout {
@@ -279,6 +279,24 @@ impl CommitNode {
 /// Escapes characters that break DOT double-quoted strings.
 fn dot_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Formats a commit summary for display: removes "branch" from merge messages
+/// and splits "Merge X into Y" into two label lines.
+fn format_commit_summary(summary: &str) -> Vec<String> {
+    let s = if summary.starts_with("Merge branch ") {
+        format!("Merge {}", &summary["Merge branch ".len()..])
+    } else {
+        summary.to_string()
+    };
+    if let Some(into_pos) = s.find(" into ") {
+        vec![
+            s[..into_pos].to_string(),
+            format!("into {}", &s[into_pos + " into ".len()..]),
+        ]
+    } else {
+        vec![s]
+    }
 }
 
 /// Strips the remote URL from git merge messages.
