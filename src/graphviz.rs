@@ -160,9 +160,10 @@ window.addEventListener('load', function() {
     var x = parseFloat(t.getAttribute('x') || 0);
     t.setAttribute('x', x + 10);
   });
-  // Drag-to-compare: drag one node onto another to open the forge compare view
+  // Drag-to-compare: drag one node onto another to open compare view
   var forgeUrl = FORGE_URL_PLACEHOLDER;
-  if (!forgeUrl) return;
+  var wsUrl2 = WS_URL_PLACEHOLDER;
+  if (!forgeUrl && !wsUrl2) return;
   // Switch nodes to grab cursor to signal draggability
   document.querySelectorAll('g.node').forEach(function(g) { g.style.cursor = 'grab'; });
   var drag = null;
@@ -227,14 +228,19 @@ window.addEventListener('load', function() {
         if (t) {
           var tsha = t.textContent.trim();
           if (/^[0-9a-f]{40}$/.test(tsha)) {
-            var seg = forgeUrl.indexOf('github.com') >= 0 ? '/compare/' : '/-/compare/';
             // In a BT graph, nodes lower on screen are older commits.
             // Always build the URL as older...newer regardless of drag direction.
             var dragY = drag.el.getBoundingClientRect().top;
             var targetY = target.getBoundingClientRect().top;
             var fromSha = dragY > targetY ? drag.sha : tsha;
             var toSha   = dragY > targetY ? tsha : drag.sha;
-            window.open(forgeUrl + seg + fromSha + '...' + toSha, '_blank');
+            if ((e.ctrlKey) && wsUrl2) {
+              // Ctrl + drag → AI diff server
+              window.open(wsUrl2 + '/diff?from=' + fromSha + '&to=' + toSha, '_blank');
+            } else if (forgeUrl) {
+              var seg = forgeUrl.indexOf('github.com') >= 0 ? '/compare/' : '/-/compare/';
+              window.open(forgeUrl + seg + fromSha + '...' + toSha, '_blank');
+            }
           }
         }
       }
