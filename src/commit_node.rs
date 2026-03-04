@@ -66,6 +66,27 @@ impl CommitNode {
         self.is_current_checkout = is_current;
     }
 
+    /// Returns the best human-readable name for use in GitLab URLs.
+    /// Priority: tag > local branch > remote branch > SHA hash.
+    pub fn best_ref_for_url(&self) -> &str {
+        if let Some(tag) = self.tags.iter().next() {
+            return tag.trim_start_matches("refs/tags/");
+        }
+        for r in &self.refs {
+            if let Some(name) = r.strip_prefix("refs/heads/") {
+                return name;
+            }
+        }
+        for r in &self.refs {
+            if let Some(rest) = r.strip_prefix("refs/remotes/") {
+                if let Some((_, branch)) = rest.split_once('/') {
+                    return branch;
+                }
+            }
+        }
+        &self.id
+    }
+
     pub fn get_dot_node(&self, theme: Theme) -> String {
         let (label_parts, colors, has_local_branch, has_remote_branch, has_other_refs) =
             self.build_label_parts(theme);

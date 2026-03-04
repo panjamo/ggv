@@ -286,10 +286,14 @@ impl GitGraphviz {
             }
             let parents = commit_parents.get(&commit.id).cloned().unwrap_or_default();
             for pid in &parents {
-                let url = self
-                    .gitlab_base_url
-                    .as_deref()
-                    .map(|base| format!("{}/-/compare/{}...{}", base, pid, commit.id));
+                let url = self.gitlab_base_url.as_deref().map(|base| {
+                    let from_ref = condensed_graph
+                        .get(pid)
+                        .map(|c| c.best_ref_for_url())
+                        .unwrap_or(pid.as_str());
+                    let to_ref = commit.best_ref_for_url();
+                    format!("{}/-/compare/{}...{}", base, from_ref, to_ref)
+                });
                 let path_commits = self.collect_path_commits(&commit.id, Some(pid.as_str()), 20);
                 let tooltip = build_tooltip(&path_commits);
                 edge_attrs.insert((pid.clone(), commit.id.clone()), (url, tooltip));
