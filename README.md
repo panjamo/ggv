@@ -9,11 +9,11 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **Comprehensive Visualization**: Displays commits, branches, remote branches, tags, and HEAD
 - **Condensed Graph**: Only referenced commits (branch tips, tags, root, merge junctions) are shown — intermediate commits are skipped for clarity
 - **Dual Theme**: Dark (default) and light theme — branch nodes are color-coded by type (main, develop, feature/\*, release/\*, hotfix/\*); switch with `--theme light`
-- **Auto Fetch**: Runs `git fetch --tags` before generating the graph to ensure tags are current
+- **Auto Fetch**: Runs `git fetch --tags --prune` before generating the graph to ensure tags are current and stale remote-tracking refs are removed
 - **SVG Output**: Generates high-quality SVG images opened automatically in your default viewer
 - **Ref Filtering**: Choose which ref types to include (local branches, remotes, tags, HEAD)
 - **Subtree View**: Limit the graph to a specific commit and all its descendants (`--from`)
-- **GitLab Integration**: Clickable graph edges linking to GitLab compare views, with hover tooltips showing the condensed commits — auto-detected from the remote URL
+- **Forge Integration**: Clickable graph edges linking to GitLab or GitHub compare views, with hover tooltips showing the condensed commits — auto-detected from the remote URL. Ref names are URL-encoded. GitHub links use commit SHAs for reliability.
 - **Cross-Platform**: Works on Windows, macOS, and Linux
 
 ## Prerequisites
@@ -72,11 +72,11 @@ Options:
   -o, --output <FILE>          Output DOT file path [default: ggv-<repo-name>.dot]
       --no-show                Skip SVG generation and opening
   -f, --filter <CHARS>         Ref types to include: b=branches, r=remotes, t=tags, h=head [default: brt]
-      --gitlab-url <URL>       GitLab base URL for clickable commit links
+      --gitlab-url <URL>       Base URL for clickable compare links — GitLab or GitHub
                                (auto-detected from remote if not specified)
       --from <COMMIT>          Limit graph to this commit and its descendants
                                (accepts commit hash, branch name, or tag)
-      --no-fetch               Skip automatic 'git fetch --tags' before generating the graph
+      --no-fetch               Skip automatic 'git fetch --tags --prune' before generating the graph
       --keep-dot               Keep the intermediate DOT file after SVG generation
       --theme <THEME>          Color theme: dark  or light [default: light]
   -h, --help                   Print help
@@ -103,7 +103,7 @@ Generate DOT file only, no SVG:
 ggv --no-show
 ```
 
-Skip the automatic tag fetch (faster, offline):
+Skip the automatic tag fetch and prune (faster, offline):
 
 ```bash
 ggv --no-fetch
@@ -127,10 +127,11 @@ Show branches and tags but not remotes:
 ggv --filter bt
 ```
 
-Override the GitLab URL for clickable links:
+Override the base URL for clickable compare links (GitLab or GitHub):
 
 ```bash
 ggv --gitlab-url https://gitlab.com/mygroup/myproject
+ggv --gitlab-url https://github.com/owner/repo
 ```
 
 Show only the history from a specific commit onwards (new root):
@@ -199,9 +200,9 @@ Branch nodes are rounded rectangles, color-coded by name. Two built-in themes ar
 | Plain commit / junction | Dark slate panel | White panel, `#E2E8F0` border |
 | Edges | `#475569` | `#CBD5E1` |
 
-Nodes with both a local branch and a matching remote branch are shown combined (`branch [remote]`).
+Each branch and remote-tracking ref is shown on its own line (e.g. `main` and `origin/main` as separate entries).
 Hovering an edge shows a tooltip listing the commits condensed into that range.
-Clicking an edge (in a browser) opens the GitLab compare view for that range.
+Clicking an edge (in a browser) opens the GitLab or GitHub compare view for that range.
 
 ## Development
 
