@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
-use crate::commit_node::{CommitNode, PredecessorInfo};
+use crate::commit_node::CommitNode;
 use crate::filter::RefFilter;
 use crate::theme::Theme;
 use crate::utils::time_ago;
@@ -269,91 +269,41 @@ impl GitGraphviz {
             "  graph [splines=ortho, nodesep=0.4, ranksep=0.5, pad=\"0.5,0.5\"];"
         )?;
 
+        // Write all nodes
+        for commit in condensed_graph.values() {
+            writeln!(writer, "  {}", commit.get_dot_node(self.theme))?;
+        }
+
+        // Build edge attributes: (parent_id, child_id) -> (url, tooltip)
+        let mut edge_attrs: HashMap<(String, String), (Option<String>, Option<String>)> =
+            HashMap::new();
         for commit in condensed_graph.values() {
             let is_ancestor_root = self
                 .ancestor_oid
                 .is_some_and(|a| a.to_string() == commit.id);
-
+            if is_ancestor_root {
+                continue;
+            }
             let parents = commit_parents.get(&commit.id).cloned().unwrap_or_default();
-
-            let predecessors: Vec<PredecessorInfo> = if is_ancestor_root {
-                vec![PredecessorInfo {
-                    parent_id: String::new(),
-                    url: None,
-                    tooltip: None,
-                }]
-            } else if parents.is_empty() {
-                // Root commit with no parents
+            for pid in &parents {
                 let url = self
                     .gitlab_base_url
                     .as_deref()
-                    .map(|base| format!("{}/-/commit/{}", base, commit.id));
-                let path_commits = self.collect_path_commits(&commit.id, None, 20);
-                let tooltip = if path_commits.is_empty() {
-                    None
-                } else {
-                    Some(
-                        path_commits
-                            .iter()
-                            .map(|(hash, msg, author, when)| {
-                                format!("{}: {} ({}, {})", hash, msg, author, when)
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    )
-                };
-                vec![PredecessorInfo {
-                    parent_id: String::new(),
-                    url,
-                    tooltip,
-                }]
-            } else {
-                parents
-                    .iter()
-                    .map(|pid| {
-                        let url = self
-                            .gitlab_base_url
-                            .as_deref()
-                            .map(|base| format!("{}/-/compare/{}...{}", base, pid, commit.id));
-                        let path_commits =
-                            self.collect_path_commits(&commit.id, Some(pid.as_str()), 20);
-                        let tooltip = if path_commits.is_empty() {
-                            None
-                        } else {
-                            Some(
-                                path_commits
-                                    .iter()
-                                    .map(|(hash, msg, author, when)| {
-                                        format!("{}: {} ({}, {})", hash, msg, author, when)
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join("\n"),
-                            )
-                        };
-                        PredecessorInfo {
-                            parent_id: pid.clone(),
-                            url,
-                            tooltip,
-                        }
-                    })
-                    .collect()
-            };
-
-            writeln!(
-                writer,
-                "  {}",
-                commit.get_dot_node(&predecessors, self.theme)
-            )?;
+                    .map(|base| format!("{}/-/compare/{}...{}", base, pid, commit.id));
+                let path_commits = self.collect_path_commits(&commit.id, Some(pid.as_str()), 20);
+                let tooltip = build_tooltip(&path_commits);
+                edge_attrs.insert((pid.clone(), commit.id.clone()), (url, tooltip));
+            }
         }
 
         for (child_id, parents) in &commit_parents {
-            let multi = parents.len() > 1;
-            for (i, parent_id) in parents.iter().enumerate() {
-                if multi {
-                    writeln!(writer, "  \"{}\" -> \"{}\":p{}", parent_id, child_id, i)?;
-                } else {
-                    writeln!(writer, "  \"{}\" -> \"{}\"", parent_id, child_id)?;
-                }
+            for parent_id in parents {
+                let (url, tooltip) = edge_attrs
+                    .get(&(parent_id.clone(), child_id.clone()))
+                    .map(|(u, t)| (u.as_deref(), t.as_deref()))
+                    .unwrap_or((None, None));
+                let attrs = build_edge_attrs(url, tooltip);
+                writeln!(writer, "  \"{}\" -> \"{}\"{}", parent_id, child_id, attrs)?;
             }
         }
 
@@ -691,5 +641,37 @@ impl GitGraphviz {
         }
 
         Ok(None)
+    }
+}
+
+fn build_tooltip(path_commits: &[(String, String, String, String)]) -> Option<String> {
+    if path_commits.is_empty() {
+        return None;
+    }
+    Some(
+        path_commits
+            .iter()
+            .map(|(hash, msg, author, when)| format!("{}: {} ({}, {})", hash, msg, author, when))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
+fn build_edge_attrs(url: Option<&str>, tooltip: Option<&str>) -> String {
+    let url_part = url.map_or(String::new(), |u| {
+        format!("URL=\"{}\", target=\"_blank\"", u)
+    });
+    let tooltip_part = tooltip.map_or(String::new(), |t| {
+        let escaped = t
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n");
+        format!("tooltip=\"{}\"", escaped)
+    });
+    match (url_part.is_empty(), tooltip_part.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => format!(" [{}]", url_part),
+        (true, false) => format!(" [{}]", tooltip_part),
+        (false, false) => format!(" [{}, {}]", url_part, tooltip_part),
     }
 }

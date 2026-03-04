@@ -26,9 +26,6 @@ pub struct ThemeColors {
     pub other_fill: &'static str,
     pub other_border: &'static str,
     pub other_font: &'static str,
-    pub cell_border_color: &'static str,
-    pub cell_bgcolor: &'static str,
-    pub cell_font_color: &'static str,
 }
 
 impl Theme {
@@ -53,9 +50,6 @@ impl Theme {
                 other_fill: "#334155",
                 other_border: "#64748B",
                 other_font: "#CBD5E1",
-                cell_border_color: "#334155",
-                cell_bgcolor: "#1E293B",
-                cell_font_color: "#94A3B8",
             },
             Theme::Light => ThemeColors {
                 bg: "#F8FAFC",
@@ -76,9 +70,6 @@ impl Theme {
                 other_fill: "#F8FAFC",
                 other_border: "#64748B",
                 other_font: "#334155",
-                cell_border_color: "#E2E8F0",
-                cell_bgcolor: "#F8FAFC",
-                cell_font_color: "#64748B",
             },
         }
     }

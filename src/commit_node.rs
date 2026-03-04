@@ -2,12 +2,6 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::theme::Theme;
 
-pub struct PredecessorInfo {
-    pub parent_id: String,
-    pub url: Option<String>,
-    pub tooltip: Option<String>,
-}
-
 #[derive(Debug, Clone)]
 pub struct CommitNode {
     pub id: String,
@@ -72,33 +66,16 @@ impl CommitNode {
         self.is_current_checkout = is_current;
     }
 
-    pub fn get_dot_node(&self, predecessors: &[PredecessorInfo], theme: Theme) -> String {
+    pub fn get_dot_node(&self, theme: Theme) -> String {
         let (label_parts, colors, has_local_branch, has_remote_branch, has_other_refs) =
             self.build_label_parts(theme);
-
-        let is_plain = self.refs.is_empty() && self.tags.is_empty();
-
-        if predecessors.len() > 1 || is_plain {
-            self.get_dot_node_html(
-                predecessors,
-                &label_parts,
-                &colors,
-                has_local_branch,
-                has_remote_branch,
-                theme,
-            )
-        } else {
-            let pred = predecessors.first();
-            self.get_dot_node_standard(
-                pred.and_then(|p| p.url.as_deref()),
-                pred.and_then(|p| p.tooltip.as_deref()),
-                &label_parts,
-                &colors,
-                has_local_branch,
-                has_remote_branch,
-                has_other_refs,
-            )
-        }
+        self.get_dot_node_standard(
+            &label_parts,
+            &colors,
+            has_local_branch,
+            has_remote_branch,
+            has_other_refs,
+        )
     }
 
     /// Compute label text and node colors from refs/tags.
@@ -247,12 +224,8 @@ impl CommitNode {
         )
     }
 
-    /// Single-predecessor rendering.
-    #[allow(clippy::too_many_arguments)]
     fn get_dot_node_standard(
         &self,
-        url: Option<&str>,
-        tooltip: Option<&str>,
         label_parts: &[String],
         colors: &NodeColors,
         has_local_branch: bool,
@@ -283,100 +256,9 @@ impl CommitNode {
         };
         let font_size: u8 = if colors.dashed { 8 } else { 9 };
 
-        let url_attr = url.map_or(String::new(), |u| {
-            format!(", URL=\"{}\", target=\"_blank\"", u)
-        });
-        let tooltip_attr = tooltip.map_or(String::new(), |t| {
-            let escaped = t
-                .replace('\\', "\\\\")
-                .replace('"', "\\\"")
-                .replace('\n', "\\n");
-            format!(", tooltip=\"{}\"", escaped)
-        });
-
         format!(
-            "\"{}\" [label=\"{}\", shape=box, style=\"{}\", color=\"{}\", fillcolor=\"{}\", fontname=\"Arial\", fontsize={}, fontcolor=\"{}\", penwidth={}, width=0.9, height=0.4{}{}]",
-            self.id, label, style, colors.border, colors.fill, font_size, colors.font, penwidth, url_attr, tooltip_attr
-        )
-    }
-
-    /// Multi-predecessor rendering using an HTML-label table.
-    fn get_dot_node_html(
-        &self,
-        predecessors: &[PredecessorInfo],
-        label_parts: &[String],
-        colors: &NodeColors,
-        has_local_branch: bool,
-        has_remote_branch: bool,
-        theme: Theme,
-    ) -> String {
-        let tc = theme.colors();
-        let penwidth = if self.is_current_checkout {
-            2_u32
-        } else {
-            colors.base_penwidth as u32
-        };
-        let col_count = predecessors.len();
-
-        let mut identity = label_parts.join("\n");
-        if self.is_current_checkout {
-            identity = format!("CURRENT\n{}", identity);
-        }
-        if let Some(readme) = &self.branch_readme {
-            identity = format!("{}\n{}", identity, readme);
-        }
-        let identity_html = html_escape(&identity).replace('\n', "<BR/>");
-
-        let header_style = if has_local_branch || has_remote_branch {
-            format!(
-                "BORDER=\"{}\" COLOR=\"{}\" BGCOLOR=\"{}\" STYLE=\"ROUNDED\"",
-                penwidth, colors.border, colors.fill
-            )
-        } else if colors.dashed {
-            format!(
-                "BORDER=\"{}\" COLOR=\"{}\" BGCOLOR=\"{}\" STYLE=\"DASHED\"",
-                penwidth, colors.border, colors.fill
-            )
-        } else {
-            format!(
-                "BORDER=\"{}\" COLOR=\"{}\" BGCOLOR=\"{}\"",
-                penwidth, colors.border, colors.fill
-            )
-        };
-
-        let mut html = format!(
-            "<<TABLE BORDER=\"0\" CELLBORDER=\"0\" CELLSPACING=\"2\" CELLPADDING=\"4\">\
-             <TR><TD COLSPAN=\"{}\" {} ALIGN=\"CENTER\"><FONT FACE=\"Arial Bold\" POINT-SIZE=\"9\" COLOR=\"{}\"><B>{}</B></FONT></TD></TR>\
-             <TR>",
-            col_count, header_style, colors.font, identity_html
-        );
-
-        for (i, pred) in predecessors.iter().enumerate() {
-            let short = &pred.parent_id[..pred.parent_id.len().min(7)];
-            let href_attr = pred.url.as_deref().map_or(String::new(), |u| {
-                format!(" HREF=\"{}\" TARGET=\"_blank\"", html_escape(u))
-            });
-            let tooltip_attr = pred.tooltip.as_deref().map_or(String::new(), |t| {
-                format!(" TOOLTIP=\"{}\"", html_escape(t).replace('\n', "&#10;"))
-            });
-            html.push_str(&format!(
-                "<TD PORT=\"p{}\" BORDER=\"1\" COLOR=\"{}\" BGCOLOR=\"{}\" ALIGN=\"CENTER\"{}{}>\
-                 <FONT FACE=\"Arial\" POINT-SIZE=\"7\" COLOR=\"{}\">← {}</FONT></TD>",
-                i,
-                tc.cell_border_color,
-                tc.cell_bgcolor,
-                href_attr,
-                tooltip_attr,
-                tc.cell_font_color,
-                short
-            ));
-        }
-
-        html.push_str("</TR></TABLE>>");
-
-        format!(
-            "\"{}\" [label={}, shape=plaintext, fontname=\"Arial\", fontsize=9]",
-            self.id, html
+            "\"{}\" [label=\"{}\", shape=box, style=\"{}\", color=\"{}\", fillcolor=\"{}\", fontname=\"Arial\", fontsize={}, fontcolor=\"{}\", penwidth={}, width=0.9, height=0.4]",
+            self.id, label, style, colors.border, colors.fill, font_size, colors.font, penwidth
         )
     }
 }
@@ -389,13 +271,6 @@ fn strip_merge_remote(msg: &str) -> String {
         }
     }
     msg.to_string()
-}
-
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
 }
 
 impl PartialEq for CommitNode {

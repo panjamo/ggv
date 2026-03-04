@@ -13,7 +13,7 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **SVG Output**: Generates high-quality SVG images opened automatically in your default viewer
 - **Ref Filtering**: Choose which ref types to include (local branches, remotes, tags, HEAD)
 - **Subtree View**: Limit the graph to a specific commit and all its descendants (`--from`)
-- **GitLab Integration**: Clickable commit nodes linking to GitLab compare views, auto-detected from the remote URL
+- **GitLab Integration**: Clickable graph edges linking to GitLab compare views, with hover tooltips showing the condensed commits — auto-detected from the remote URL
 - **Cross-Platform**: Works on Windows, macOS, and Linux
 
 ## Prerequisites
@@ -200,8 +200,8 @@ Branch nodes are rounded rectangles, color-coded by name. Two built-in themes ar
 | Edges | `#475569` | `#CBD5E1` |
 
 Nodes with both a local branch and a matching remote branch are shown combined (`branch [remote]`).
-Hover tooltips show the commits condensed into each graph edge.
-Clicking a node (in a browser) opens the GitLab compare view for that range.
+Hovering an edge shows a tooltip listing the commits condensed into that range.
+Clicking an edge (in a browser) opens the GitLab compare view for that range.
 
 ## Development
 
