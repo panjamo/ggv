@@ -59,6 +59,7 @@ fn main() -> Result<()> {
         args.gitlab_url,
         args.from,
         args.theme,
+        args.current_branch,
     )?;
     git_viz.generate_dot(&output)?;
 

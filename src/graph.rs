@@ -15,6 +15,7 @@ pub struct GitGraphviz {
     gitlab_base_url: Option<String>,
     ancestor_oid: Option<Oid>,
     theme: Theme,
+    current_branch_only: bool,
 }
 
 impl GitGraphviz {
@@ -24,6 +25,7 @@ impl GitGraphviz {
         gitlab_url: Option<String>,
         from_commit: Option<String>,
         theme: Theme,
+        current_branch_only: bool,
     ) -> Result<Self> {
         let repo = Repository::open(repo_path)
             .with_context(|| format!("Failed to open repository at: {}", repo_path))?;
@@ -48,6 +50,7 @@ impl GitGraphviz {
             gitlab_base_url,
             ancestor_oid,
             theme,
+            current_branch_only,
         })
     }
 
@@ -146,6 +149,23 @@ impl GitGraphviz {
         let mut referenced_commits: HashMap<String, CommitNode> = HashMap::new();
         let mut branch_tips: HashMap<String, String> = HashMap::new();
 
+        // Resolve HEAD OID once for --current-branch filtering
+        let head_oid: Option<Oid> = self.repo.head().ok().and_then(|h| h.target());
+
+        // Returns true if oid is an ancestor of HEAD (or IS HEAD), used when --current-branch is set
+        let is_on_current_branch = |oid: Oid| -> bool {
+            match head_oid {
+                None => true,
+                Some(head) => {
+                    oid == head
+                        || self
+                            .repo
+                            .graph_descendant_of(head, oid)
+                            .unwrap_or(false)
+                }
+            }
+        };
+
         if self.filter.should_include_branches() {
             let branches = self.repo.branches(Some(BranchType::Local))?;
             for branch_result in branches {
@@ -154,6 +174,9 @@ impl GitGraphviz {
                 let ref_name = format!("refs/heads/{}", branch_name);
 
                 if let Some(oid) = branch.get().target() {
+                    if self.current_branch_only && !is_on_current_branch(oid) {
+                        continue;
+                    }
                     let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
                     if let Some(commit_node) = referenced_commits.get_mut(&commit_id) {
                         commit_node.add_ref(ref_name.clone());
@@ -171,6 +194,9 @@ impl GitGraphviz {
                 let ref_name = format!("refs/remotes/{}", branch_name);
 
                 if let Some(oid) = branch.get().target() {
+                    if self.current_branch_only && !is_on_current_branch(oid) {
+                        continue;
+                    }
                     let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
                     if let Some(commit_node) = referenced_commits.get_mut(&commit_id) {
                         commit_node.add_ref(ref_name.clone());
@@ -196,7 +222,7 @@ impl GitGraphviz {
         }
 
         if self.filter.should_include_tags() {
-            self.add_tagged_commits(&mut referenced_commits)?;
+            self.add_tagged_commits(&mut referenced_commits, head_oid)?;
         }
 
         self.add_merge_base_commits(&mut referenced_commits, &branch_tips)?;
@@ -358,7 +384,11 @@ impl GitGraphviz {
         Ok(oid_str)
     }
 
-    fn add_tagged_commits(&self, all_commits: &mut HashMap<String, CommitNode>) -> Result<()> {
+    fn add_tagged_commits(
+        &self,
+        all_commits: &mut HashMap<String, CommitNode>,
+        head_oid: Option<Oid>,
+    ) -> Result<()> {
         let mut tag_commits = Vec::new();
 
         self.repo.tag_foreach(|oid, name| {
@@ -379,6 +409,21 @@ impl GitGraphviz {
         })?;
 
         for (commit_oid, tag_name) in tag_commits {
+            if self.current_branch_only {
+                let on_branch = match head_oid {
+                    None => true,
+                    Some(head) => {
+                        commit_oid == head
+                            || self
+                                .repo
+                                .graph_descendant_of(head, commit_oid)
+                                .unwrap_or(false)
+                    }
+                };
+                if !on_branch {
+                    continue;
+                }
+            }
             let commit_id = self.add_ref_commit(all_commits, commit_oid)?;
             if let Some(commit_node) = all_commits.get_mut(&commit_id) {
                 commit_node.add_tag(tag_name);

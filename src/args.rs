@@ -60,4 +60,11 @@ pub struct Args {
         value_enum
     )]
     pub theme: Theme,
+
+    #[arg(
+        long,
+        help = "Show only refs that are on the current branch (ancestors of HEAD)",
+        action = clap::ArgAction::SetTrue
+    )]
+    pub current_branch: bool,
 }

@@ -12,8 +12,11 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **Auto Fetch**: Runs `git fetch --tags --prune` before generating the graph to ensure tags are current and stale remote-tracking refs are removed
 - **SVG Output**: Generates high-quality SVG images opened automatically in your default viewer
 - **Ref Filtering**: Choose which ref types to include (local branches, remotes, tags, HEAD)
+- **Current-Branch View**: `--current-branch` hides all refs not on the ancestry path of HEAD — shows only what is reachable from the current checkout
 - **Subtree View**: Limit the graph to a specific commit and all its descendants (`--from`)
 - **Forge Integration**: Clickable graph edges linking to GitLab or GitHub compare views, with hover tooltips showing the condensed commits — auto-detected from the remote URL. Ref names are URL-encoded. GitHub links use commit SHAs for reliability.
+- **SHA Copy**: Click any commit node to copy its full SHA to the clipboard (amber flash confirms the copy)
+- **Graph Tooltip**: Hover the SVG background to see the repository name, current branch, HEAD commit, author, and date
 - **Cross-Platform**: Works on Windows, macOS, and Linux
 
 ## Prerequisites
@@ -76,9 +79,10 @@ Options:
                                (auto-detected from remote if not specified)
       --from <COMMIT>          Limit graph to this commit and its descendants
                                (accepts commit hash, branch name, or tag)
+      --current-branch         Show only refs that are ancestors of HEAD (hides parallel branches)
       --no-fetch               Skip automatic 'git fetch --tags --prune' before generating the graph
       --keep-dot               Keep the intermediate DOT file after SVG generation
-      --theme <THEME>          Color theme: dark  or light [default: light]
+      --theme <THEME>          Color theme: dark or light [default: light]
   -h, --help                   Print help
   -V, --version                Print version
 ```
@@ -159,6 +163,18 @@ Use the light theme (GitHub Light / Linear style):
 ggv --theme light
 ```
 
+Show only the current branch (hide all parallel branches and their remotes/tags):
+
+```bash
+ggv --current-branch
+```
+
+Combine with `--from` to scope both the starting point and the visible branches:
+
+```bash
+ggv --from v1.0.0 --current-branch
+```
+
 ## Output
 
 1. **SVG file** (`ggv-<repo-name>.svg`): Visual graph opened automatically in your default viewer.
@@ -203,6 +219,8 @@ Branch nodes are rounded rectangles, color-coded by name. Two built-in themes ar
 Each branch and remote-tracking ref is shown on its own line (e.g. `main` and `origin/main` as separate entries).
 Hovering an edge shows a tooltip listing the commits condensed into that range.
 Clicking an edge (in a browser) opens the GitLab or GitHub compare view for that range.
+Clicking a commit node copies its full 40-character SHA to the clipboard; the node border flashes amber to confirm.
+Hovering the SVG background shows a tooltip with the repository name, current branch, HEAD commit, author, and date.
 
 ## Development
 
