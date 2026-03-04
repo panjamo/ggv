@@ -287,14 +287,28 @@ impl GitGraphviz {
             let parents = commit_parents.get(&commit.id).cloned().unwrap_or_default();
             for pid in &parents {
                 let url = self.gitlab_base_url.as_deref().map(|base| {
-                    let from_ref = condensed_graph
-                        .get(pid)
-                        .map(|c| c.best_ref_for_url())
-                        .unwrap_or(pid.as_str());
-                    let to_ref = commit.best_ref_for_url();
+                    let is_github = base.contains("github.com");
+                    let from_ref = if is_github {
+                        condensed_graph
+                            .get(pid)
+                            .map(|c| c.id.as_str())
+                            .unwrap_or(pid.as_str())
+                    } else {
+                        condensed_graph
+                            .get(pid)
+                            .map(|c| c.best_ref_for_url())
+                            .unwrap_or(pid.as_str())
+                    };
+                    let to_ref = if is_github {
+                        commit.id.as_str()
+                    } else {
+                        commit.best_ref_for_url()
+                    };
+                    let compare_segment = if is_github { "/compare/" } else { "/-/compare/" };
                     format!(
-                        "{}/-/compare/{}...{}",
+                        "{}{}{}...{}",
                         base,
+                        compare_segment,
                         url_encode_ref(from_ref),
                         url_encode_ref(to_ref)
                     )
