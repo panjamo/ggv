@@ -119,7 +119,12 @@ fn handle_connection(
 
     if !use_ai {
         run_git_difftool(repo_path, &sha1, &sha2);
-        send_response(&mut stream, 200, "text/html; charset=utf-8", "");
+        send_response(
+            &mut stream,
+            200,
+            "text/html; charset=utf-8",
+            "<html><body><script>window.close();</script></body></html>",
+        );
         return;
     }
 

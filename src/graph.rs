@@ -9,6 +9,8 @@ use crate::filter::RefFilter;
 use crate::theme::Theme;
 use crate::utils::{repo_name_from_path, time_ago};
 
+type EdgeAttrs = HashMap<(String, String), (Option<String>, Option<String>, usize)>;
+
 pub struct GitGraphviz {
     repo: Repository,
     filter: RefFilter,
@@ -306,8 +308,7 @@ impl GitGraphviz {
         }
 
         // Build edge attributes: (parent_id, child_id) -> (url, tooltip, count)
-        let mut edge_attrs: HashMap<(String, String), (Option<String>, Option<String>, usize)> =
-            HashMap::new();
+        let mut edge_attrs: EdgeAttrs = HashMap::new();
         for commit in condensed_graph.values() {
             let is_ancestor_root = self
                 .ancestor_oid

@@ -284,8 +284,8 @@ fn dot_escape(s: &str) -> String {
 /// Formats a commit summary for display: removes "branch" from merge messages
 /// and splits "Merge X into Y" into two label lines.
 fn format_commit_summary(summary: &str) -> Vec<String> {
-    let s = if summary.starts_with("Merge branch ") {
-        format!("Merge {}", &summary["Merge branch ".len()..])
+    let s = if let Some(stripped) = summary.strip_prefix("Merge branch ") {
+        format!("Merge {}", stripped)
     } else {
         summary.to_string()
     };
