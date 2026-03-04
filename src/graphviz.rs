@@ -102,8 +102,53 @@ pub fn generate_svg(dot_path: &str) -> Result<String> {
     }
 
     let svg_path_str = svg_path.to_string_lossy().to_string();
+    inject_clipboard_js(&svg_path_str)?;
     println!("Generated SVG file: {}", svg_path_str);
     Ok(svg_path_str)
+}
+
+fn inject_clipboard_js(svg_path: &str) -> Result<()> {
+    let content = std::fs::read_to_string(svg_path)
+        .with_context(|| format!("Failed to read SVG: {}", svg_path))?;
+
+    let script = r#"<script type="text/ecmascript">
+function copyHash(el) {
+  var t = el.querySelector('title');
+  if (!t) return;
+  var sha = t.textContent.trim();
+  if (!/^[0-9a-f]{40}$/.test(sha)) return;
+  navigator.clipboard.writeText(sha).then(function() {
+    el.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s) {
+      var orig = s.getAttribute('stroke');
+      s.setAttribute('stroke', '#f59e0b');
+      setTimeout(function() { s.setAttribute('stroke', orig); }, 500);
+    });
+  });
+}
+</script>"#;
+
+    // Inject script after the opening <svg ...> tag
+    let modified = if let Some(svg_start) = content.find("<svg ") {
+        if let Some(tag_end) = content[svg_start..].find('>') {
+            let insert_at = svg_start + tag_end + 1;
+            format!("{}\n{}\n{}", &content[..insert_at], script, &content[insert_at..])
+        } else {
+            content
+        }
+    } else {
+        content
+    };
+
+    // Add onclick + pointer cursor to every node <g>
+    let modified = modified.replace(
+        "class=\"node\">",
+        "class=\"node\" onclick=\"copyHash(this)\" style=\"cursor:pointer;\">",
+    );
+
+    std::fs::write(svg_path, modified)
+        .with_context(|| format!("Failed to write SVG: {}", svg_path))?;
+
+    Ok(())
 }
 
 pub fn open_file(file_path: &str) -> Result<()> {
