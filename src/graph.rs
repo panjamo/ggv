@@ -292,7 +292,12 @@ impl GitGraphviz {
                         .map(|c| c.best_ref_for_url())
                         .unwrap_or(pid.as_str());
                     let to_ref = commit.best_ref_for_url();
-                    format!("{}/-/compare/{}...{}", base, from_ref, to_ref)
+                    format!(
+                        "{}/-/compare/{}...{}",
+                        base,
+                        url_encode_ref(from_ref),
+                        url_encode_ref(to_ref)
+                    )
                 });
                 let path_commits = self.collect_path_commits(&commit.id, Some(pid.as_str()), 20);
                 let tooltip = build_tooltip(&path_commits);
@@ -646,6 +651,22 @@ impl GitGraphviz {
 
         Ok(None)
     }
+}
+
+fn url_encode_ref(r: &str) -> String {
+    let mut out = String::with_capacity(r.len());
+    for b in r.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => {
+                out.push('%');
+                out.push_str(&format!("{:02X}", b));
+            }
+        }
+    }
+    out
 }
 
 fn build_tooltip(path_commits: &[(String, String, String, String)]) -> Option<String> {

@@ -253,13 +253,17 @@ impl CommitNode {
         has_remote_branch: bool,
         _has_other_refs: bool,
     ) -> String {
-        let mut label = label_parts.join("\\n");
+        let mut label = label_parts
+            .iter()
+            .map(|p| dot_escape(p))
+            .collect::<Vec<_>>()
+            .join("\\n");
 
         if self.is_current_checkout {
             label = format!("CURRENT\\n{}", label);
         }
         if let Some(readme) = &self.branch_readme {
-            label = format!("{}\\n{}", label, readme);
+            label = format!("{}\\n{}", label, dot_escape(readme));
         }
 
         let style = if colors.dashed {
@@ -282,6 +286,11 @@ impl CommitNode {
             self.id, label, style, colors.border, colors.fill, font_size, colors.font, penwidth
         )
     }
+}
+
+/// Escapes characters that break DOT double-quoted strings.
+fn dot_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 /// Strips the remote URL from git merge messages.
