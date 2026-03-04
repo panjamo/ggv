@@ -305,8 +305,8 @@ impl GitGraphviz {
             writeln!(writer, "  {}", commit.get_dot_node(self.theme))?;
         }
 
-        // Build edge attributes: (parent_id, child_id) -> (url, tooltip)
-        let mut edge_attrs: HashMap<(String, String), (Option<String>, Option<String>)> =
+        // Build edge attributes: (parent_id, child_id) -> (url, tooltip, count)
+        let mut edge_attrs: HashMap<(String, String), (Option<String>, Option<String>, usize)> =
             HashMap::new();
         for commit in condensed_graph.values() {
             let is_ancestor_root = self
@@ -346,17 +346,18 @@ impl GitGraphviz {
                 });
                 let path_commits = self.collect_path_commits(&commit.id, Some(pid.as_str()), 20);
                 let tooltip = build_tooltip(&path_commits);
-                edge_attrs.insert((pid.clone(), commit.id.clone()), (url, tooltip));
+                let count = count_path_commits(&self.repo, &commit.id, Some(pid.as_str()));
+                edge_attrs.insert((pid.clone(), commit.id.clone()), (url, tooltip, count));
             }
         }
 
         for (child_id, parents) in &commit_parents {
             for parent_id in parents {
-                let (url, tooltip) = edge_attrs
+                let (url, tooltip, count) = edge_attrs
                     .get(&(parent_id.clone(), child_id.clone()))
-                    .map(|(u, t)| (u.as_deref(), t.as_deref()))
-                    .unwrap_or((None, None));
-                let attrs = build_edge_attrs(url, tooltip);
+                    .map(|(u, t, c)| (u.as_deref(), t.as_deref(), *c))
+                    .unwrap_or((None, None, 0));
+                let attrs = build_edge_attrs(url, tooltip, count);
                 writeln!(writer, "  \"{}\" -> \"{}\"{}", parent_id, child_id, attrs)?;
             }
         }
@@ -772,6 +773,24 @@ fn build_graph_tooltip(repo: &Repository) -> String {
     lines.join("\n")
 }
 
+fn count_path_commits(repo: &git2::Repository, from_id: &str, stop_id: Option<&str>) -> usize {
+    let Ok(oid) = from_id.parse::<Oid>() else {
+        return 0;
+    };
+    let Ok(mut revwalk) = repo.revwalk() else {
+        return 0;
+    };
+    if revwalk.push(oid).is_err() {
+        return 0;
+    }
+    if let Some(stop) = stop_id {
+        if let Ok(stop_oid) = stop.parse::<Oid>() {
+            let _ = revwalk.hide(stop_oid);
+        }
+    }
+    revwalk.count()
+}
+
 fn build_tooltip(path_commits: &[(String, String, String, String)]) -> Option<String> {
     if path_commits.is_empty() {
         return None;
@@ -785,7 +804,7 @@ fn build_tooltip(path_commits: &[(String, String, String, String)]) -> Option<St
     )
 }
 
-fn build_edge_attrs(url: Option<&str>, tooltip: Option<&str>) -> String {
+fn build_edge_attrs(url: Option<&str>, tooltip: Option<&str>, count: usize) -> String {
     let url_part = url.map_or(String::new(), |u| {
         format!("URL=\"{}\", target=\"_blank\"", u)
     });
@@ -796,10 +815,22 @@ fn build_edge_attrs(url: Option<&str>, tooltip: Option<&str>) -> String {
             .replace('\n', "\\n");
         format!("tooltip=\"{}\"", escaped)
     });
-    match (url_part.is_empty(), tooltip_part.is_empty()) {
-        (true, true) => String::new(),
-        (false, true) => format!(" [{}]", url_part),
-        (true, false) => format!(" [{}]", tooltip_part),
-        (false, false) => format!(" [{}, {}]", url_part, tooltip_part),
+    let label_part = if count > 0 {
+        format!(
+            "xlabel=\"{}\", fontsize=8, fontcolor=\"#94A3B8\"",
+            count
+        )
+    } else {
+        String::new()
+    };
+    let parts: Vec<&str> = [&url_part, &tooltip_part, &label_part]
+        .iter()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.as_str())
+        .collect();
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", parts.join(", "))
     }
 }

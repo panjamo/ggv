@@ -125,6 +125,13 @@ function copyHash(el) {
     });
   });
 }
+// Offset edge count labels away from the edge line
+window.addEventListener('load', function() {
+  document.querySelectorAll('g.edge text').forEach(function(t) {
+    var x = parseFloat(t.getAttribute('x') || 0);
+    t.setAttribute('x', x + 10);
+  });
+});
 </script>"#;
 
     // Inject script after the opening <svg ...> tag
