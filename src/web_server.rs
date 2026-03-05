@@ -466,7 +466,7 @@ fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>
         }
     };
 
-    let log_range = format!("{}..{}", base, sha2);
+    let exclude_base = format!("^{}", base);
     let log_out = std::process::Command::new("git")
         .args([
             "-C",
@@ -474,7 +474,9 @@ fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>
             "log",
             GIT_LOG_METADATA_FORMAT,
             "--name-status",
-            &log_range,
+            &exclude_base,
+            sha1,
+            sha2,
         ])
         .output()
         .ok();
@@ -568,8 +570,8 @@ fn run_gia_diff(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) -
         return "No differences found between these commits.".to_string();
     }
 
-    // Commit metadata: log(base..sha2) with branch/tag decorations
-    let log_range = format!("{}..{}", base, sha2);
+    // Commit metadata: log(both sides relative to base) with branch/tag decorations
+    let exclude_base = format!("^{}", base);
     let log_out = match std::process::Command::new("git")
         .args([
             "-C",
@@ -577,7 +579,9 @@ fn run_gia_diff(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) -
             "log",
             GIT_LOG_METADATA_FORMAT,
             "--name-status",
-            &log_range,
+            &exclude_base,
+            sha1,
+            sha2,
         ])
         .output()
     {
@@ -641,7 +645,7 @@ fn run_gia_log(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) ->
         Err(e) => return format!("Error resolving log base: {e}"),
     };
 
-    let log_range = format!("{}..{}", base, sha2);
+    let exclude_base = format!("^{}", base);
     let log_out = match std::process::Command::new("git")
         .args([
             "-C",
@@ -649,7 +653,9 @@ fn run_gia_log(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) ->
             "log",
             GIT_LOG_METADATA_FORMAT,
             "--name-status",
-            &log_range,
+            &exclude_base,
+            sha1,
+            sha2,
         ])
         .output()
     {
@@ -702,7 +708,7 @@ fn run_gia_log_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&
         }
     };
 
-    let log_range = format!("{}..{}", base, sha2);
+    let exclude_base = format!("^{}", base);
     let log_out = match std::process::Command::new("git")
         .args([
             "-C",
@@ -710,7 +716,9 @@ fn run_gia_log_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&
             "log",
             GIT_LOG_METADATA_FORMAT,
             "--name-status",
-            &log_range,
+            &exclude_base,
+            sha1,
+            sha2,
         ])
         .output()
     {
@@ -748,14 +756,16 @@ fn serve_git_log(repo_path: &str, sha1: &str, sha2: &str) -> String {
         Err(e) => return format!("<pre>Error resolving log base: {}</pre>", html_escape(&e)),
     };
 
-    let log_range = format!("{}..{}", base, sha2);
+    let exclude_base = format!("^{}", base);
     let out = match std::process::Command::new("git")
         .args([
             "-C",
             repo_path,
             "log",
             "--pretty=format:commit %H%nAuthor: %an <%ae>%nDate:   %ci%nRefs:   %D%n%n    %s%n%n    %b",
-            &log_range,
+            &exclude_base,
+            sha1,
+            sha2,
         ])
         .output()
     {
