@@ -166,7 +166,17 @@ fn handle_connection(
             let force_ai = params.get("ai").map(|v| v == "1").unwrap_or(false);
 
             if !force_ai {
-                run_git_difftool(repo_path, &sha1, &sha2);
+                if has_git_diff(repo_path, &sha1, &sha2) {
+                    run_git_difftool(repo_path, &sha1, &sha2);
+                } else if !use_ai {
+                    send_response(
+                        &mut stream,
+                        200,
+                        "text/html; charset=utf-8",
+                        &build_no_diff_html(&sha1, &sha2),
+                    );
+                    return;
+                }
             }
 
             if !use_ai && !force_ai {
@@ -386,6 +396,30 @@ fn parse_query(query: &str) -> HashMap<String, String> {
         }
     }
     map
+}
+
+fn has_git_diff(repo_path: &str, sha1: &str, sha2: &str) -> bool {
+    std::process::Command::new("git")
+        .args(["-C", repo_path, "diff", "--quiet", sha1, sha2])
+        .status()
+        .map(|s| !s.success())
+        .unwrap_or(true)
+}
+
+fn build_no_diff_html(sha1: &str, sha2: &str) -> String {
+    let s1 = &sha1[..sha1.len().min(7)];
+    let s2 = &sha2[..sha2.len().min(7)];
+    format!(
+        r#"<html><head><meta charset="utf-8"><style>
+body{{font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f5f5f5}}
+.box{{background:#fff;border:1px solid #ccc;border-radius:6px;padding:24px 32px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.12)}}
+h3{{margin:0 0 8px}}p{{margin:0 0 16px;color:#555}}button{{padding:6px 20px;cursor:pointer}}
+</style></head><body><div class="box">
+<h3>No Differences Found</h3>
+<p>{s1} &rarr; {s2} are identical.</p>
+<button onclick="window.close()">Close</button>
+</div></body></html>"#
+    )
 }
 
 fn run_git_difftool(repo_path: &str, sha1: &str, sha2: &str) {
