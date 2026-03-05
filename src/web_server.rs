@@ -179,6 +179,15 @@ fn handle_connection(
                 return;
             }
 
+            if !has_git_diff(repo_path, &sha1, &sha2) {
+                send_response(
+                    &mut stream,
+                    200,
+                    "text/html; charset=utf-8",
+                    &build_no_diff_html(&sha1, &sha2),
+                );
+                return;
+            }
             let effective_prompt = prompt.as_deref();
             if gia_browser {
                 run_gia_browser(repo_path, &sha1, &sha2, effective_prompt);
@@ -214,6 +223,15 @@ fn handle_connection(
                     return;
                 }
             };
+            if !has_git_diff(repo_path, &sha1, &sha2) {
+                send_response(
+                    &mut stream,
+                    200,
+                    "text/html; charset=utf-8",
+                    &build_no_diff_html(&sha1, &sha2),
+                );
+                return;
+            }
             let effective_prompt = prompt.as_deref();
             if gia_browser {
                 run_gia_log_browser(repo_path, &sha1, &sha2, effective_prompt);
@@ -249,6 +267,15 @@ fn handle_connection(
                     return;
                 }
             };
+            if !has_git_diff(repo_path, &sha1, &sha2) {
+                send_response(
+                    &mut stream,
+                    200,
+                    "text/html; charset=utf-8",
+                    &build_no_diff_html(&sha1, &sha2),
+                );
+                return;
+            }
             let html = serve_git_log(repo_path, &sha1, &sha2);
             send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
         }
@@ -387,6 +414,7 @@ fn parse_query(query: &str) -> HashMap<String, String> {
     }
     map
 }
+
 
 fn has_git_diff(repo_path: &str, sha1: &str, sha2: &str) -> bool {
     std::process::Command::new("git")
