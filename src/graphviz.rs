@@ -297,6 +297,15 @@ window.addEventListener('load', function() {
       d.style.cssText = 'border-top:1px solid #2d3748;margin:4px 0;';
       return d;
     }
+    // Parse structured node id: sha~L~local1,local2~R~remote1,remote2~T~tag1,tag2
+    // ~ is forbidden in git ref names so it is an unambiguous separator.
+    function parseNodeId(id) {
+      var local = [], remote = [], tags = [];
+      var lm = id.match(/~L~([^~]*)/); if (lm) local  = lm[1].split(',').filter(Boolean);
+      var rm = id.match(/~R~([^~]*)/); if (rm) remote = rm[1].split(',').filter(Boolean);
+      var tm = id.match(/~T~([^~]*)/); if (tm) tags   = tm[1].split(',').filter(Boolean);
+      return { local: local, remote: remote, tags: tags };
+    }
     document.querySelectorAll('g.node').forEach(function(g) {
       g.addEventListener('contextmenu', function(e) {
         e.preventDefault();
@@ -305,16 +314,7 @@ window.addEventListener('load', function() {
         if (!t) return;
         var sha = t.textContent.trim();
         if (!/^[0-9a-f]{40}$/.test(sha)) return;
-        // Collect branch/tag names: text elements without spaces, excluding CURRENT and short-sha
-        var isDashed = Array.from(g.querySelectorAll('polygon,ellipse,path,rect'))
-          .some(function(el) { return !!el.getAttribute('stroke-dasharray'); });
-        var names = [];
-        g.querySelectorAll('text').forEach(function(tx) {
-          var v = tx.textContent.trim();
-          if (v && v !== 'CURRENT' && v.indexOf(' ') === -1 && !/^[0-9a-f]{7}$/.test(v)) {
-            names.push(v);
-          }
-        });
+        var refs = parseNodeId(g.getAttribute('id') || '');
         ctxMenu = document.createElement('div');
         ctxMenu.style.cssText = 'position:fixed;left:' + e.clientX + 'px;top:' + e.clientY + 'px;background:#1a1f2e;border:1px solid #2d3748;border-radius:8px;padding:4px 0;z-index:9999;min-width:180px;box-shadow:0 8px 24px rgba(0,0,0,0.6);font-family:"Segoe UI",sans-serif;';
         ctxMenu.addEventListener('click', function(ev) { ev.stopPropagation(); });
@@ -325,12 +325,36 @@ window.addEventListener('load', function() {
         ctxMenu.appendChild(makeMenuItem('Copy SHA', function() {
           navigator.clipboard.writeText(sha);
         }));
-        var refLabel = isDashed ? 'Copy tag: ' : 'Copy branch: ';
-        names.forEach(function(name) {
-          ctxMenu.appendChild(makeMenuItem(refLabel + name, function() {
+        refs.local.forEach(function(name) {
+          ctxMenu.appendChild(makeMenuItem('Copy branch: ' + name, function() {
             navigator.clipboard.writeText(name);
           }));
         });
+        refs.remote.forEach(function(name) {
+          ctxMenu.appendChild(makeMenuItem('Copy branch: ' + name, function() {
+            navigator.clipboard.writeText(name);
+          }));
+        });
+        refs.tags.forEach(function(name) {
+          ctxMenu.appendChild(makeMenuItem('Copy tag: ' + name, function() {
+            navigator.clipboard.writeText(name);
+          }));
+        });
+        if (refs.local.length > 0 || refs.remote.length > 0) {
+          ctxMenu.appendChild(makeDivider());
+          refs.local.forEach(function(name) {
+            ctxMenu.appendChild(makeMenuItem('Delete local: ' + name, function() {
+              if (!confirm('Force-delete local branch "' + name + '"?')) return;
+              fetch(wsUrl + '/delete-branch?name=' + encodeURIComponent(name) + '&scope=local');
+            }));
+          });
+          refs.remote.forEach(function(name) {
+            ctxMenu.appendChild(makeMenuItem('Delete remote: ' + name, function() {
+              if (!confirm('Delete remote branch "' + name + '"?')) return;
+              fetch(wsUrl + '/delete-branch?name=' + encodeURIComponent(name) + '&scope=remote');
+            }));
+          });
+        }
         document.body.appendChild(ctxMenu);
       });
     });

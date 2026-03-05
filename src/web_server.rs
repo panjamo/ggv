@@ -113,6 +113,19 @@ fn handle_connection(
             run_git_checkout(repo_path, &sha);
             send_response(&mut stream, 200, "text/plain", "OK");
         }
+        "/delete-branch" => {
+            let params = parse_query(query);
+            let name = match params.get("name") {
+                Some(n) if is_valid_ref_name(n) => n.clone(),
+                _ => {
+                    send_response(&mut stream, 400, "text/plain", "Invalid or missing 'name'");
+                    return;
+                }
+            };
+            let scope = params.get("scope").map(|s| s.as_str()).unwrap_or("local");
+            run_branch_delete(repo_path, &name, scope);
+            send_response(&mut stream, 200, "text/plain", "OK");
+        }
         "/diff" => {
             let params = parse_query(query);
             let sha1 = match params.get("from") {
@@ -237,6 +250,35 @@ fn run_git_checkout(repo_path: &str, sha: &str) {
     let _ = std::process::Command::new("git")
         .args(["-C", repo_path, "checkout", sha])
         .status();
+}
+
+fn run_branch_delete(repo_path: &str, name: &str, scope: &str) {
+    match scope {
+        "local" => {
+            let _ = std::process::Command::new("git")
+                .args(["-C", repo_path, "branch", "-D", name])
+                .status();
+        }
+        "remote" => {
+            // name is "remote/branch" — split on the first '/'
+            let (remote, branch) = if let Some(idx) = name.find('/') {
+                (&name[..idx], &name[idx + 1..])
+            } else {
+                ("origin", name)
+            };
+            let _ = std::process::Command::new("git")
+                .args(["-C", repo_path, "push", remote, "--delete", branch])
+                .status();
+        }
+        _ => {}
+    }
+}
+
+fn is_valid_ref_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 256
+        && s.chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '@' | '~'))
 }
 
 fn is_valid_sha(s: &str) -> bool {

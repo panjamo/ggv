@@ -90,12 +90,46 @@ impl CommitNode {
     pub fn get_dot_node(&self, theme: Theme) -> String {
         let (label_parts, colors, has_local_branch, has_remote_branch, has_other_refs) =
             self.build_label_parts(theme);
+
+        // Build structured node id: sha~L~local1,local2~R~remote1,remote2~T~tag1,tag2
+        // ~ is forbidden in git ref names, making it a safe separator.
+        // Used by the web UI context menu to reliably identify branch/tag names.
+        let local_branches: Vec<&str> = self
+            .refs
+            .iter()
+            .filter_map(|r| r.strip_prefix("refs/heads/"))
+            .collect();
+        let remote_branches: Vec<&str> = self
+            .refs
+            .iter()
+            .filter_map(|r| r.strip_prefix("refs/remotes/"))
+            .collect();
+        let tag_names: Vec<&str> = self
+            .tags
+            .iter()
+            .map(|t| t.trim_start_matches("refs/tags/"))
+            .collect();
+        let mut node_id = self.id.clone();
+        if !local_branches.is_empty() {
+            node_id.push_str("~L~");
+            node_id.push_str(&local_branches.join(","));
+        }
+        if !remote_branches.is_empty() {
+            node_id.push_str("~R~");
+            node_id.push_str(&remote_branches.join(","));
+        }
+        if !tag_names.is_empty() {
+            node_id.push_str("~T~");
+            node_id.push_str(&tag_names.join(","));
+        }
+
         self.get_dot_node_standard(
             &label_parts,
             &colors,
             has_local_branch,
             has_remote_branch,
             has_other_refs,
+            &node_id,
         )
     }
 
@@ -235,6 +269,7 @@ impl CommitNode {
         has_local_branch: bool,
         has_remote_branch: bool,
         _has_other_refs: bool,
+        node_id: &str,
     ) -> String {
         let mut label = label_parts
             .iter()
@@ -270,8 +305,8 @@ impl CommitNode {
         let font_size: u8 = if colors.dashed { 8 } else { 9 };
 
         format!(
-            "\"{}\" [label=\"{}\", shape=box, style=\"{}\", color=\"{}\", fillcolor=\"{}\", fontname=\"Arial\", fontsize={}, fontcolor=\"{}\", penwidth={}, width=0.9, height=0.4]",
-            self.id, label, style, colors.border, colors.fill, font_size, colors.font, penwidth
+            "\"{}\" [id=\"{}\", label=\"{}\", shape=box, style=\"{}\", color=\"{}\", fillcolor=\"{}\", fontname=\"Arial\", fontsize={}, fontcolor=\"{}\", penwidth={}, width=0.9, height=0.4]",
+            self.id, node_id, label, style, colors.border, colors.fill, font_size, colors.font, penwidth
         )
     }
 }
