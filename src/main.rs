@@ -56,10 +56,16 @@ fn main() -> Result<()> {
         }
     });
 
+    let svg_path = std::path::Path::new(&output)
+        .with_extension("svg")
+        .to_string_lossy()
+        .to_string();
+
     let (server_handle, web_server_url) = if args.web_server {
         let (handle, port) = web_server::start(
             args.web_port,
             args.repo_path.clone(),
+            svg_path.clone(),
             args.use_ai,
             args.gia_browser,
             args.gia_prompt,
@@ -82,12 +88,16 @@ fn main() -> Result<()> {
     git_viz.generate_dot(&output)?;
 
     if !args.no_show {
-        let svg_path = generate_svg(&output, git_viz.forge_url(), web_server_url.as_deref())?;
+        let generated_svg = generate_svg(&output, git_viz.forge_url(), web_server_url.as_deref())?;
         if !args.keep_dot {
             std::fs::remove_file(&output)
                 .with_context(|| format!("Failed to delete DOT file: {}", output))?;
         }
-        open_file(&svg_path)?;
+        if let Some(ref ws_url) = web_server_url {
+            open_file(&format!("{}/view", ws_url))?;
+        } else {
+            open_file(&generated_svg)?;
+        }
     }
 
     if let Some(handle) = server_handle {

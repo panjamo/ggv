@@ -9,7 +9,7 @@ const DEFAULT_BROWSER_PROMPT: &str = "Summarize the changes.
         The summary should be nicely characterized by headings.
         Structure the whole thing.";
 
-const DEFAULT_DIFF_PROMPT: &str = "short summarize the git diff output, focus on the most important changes and their implications. 
+const DEFAULT_DIFF_PROMPT: &str = "short summarize the git diff output, focus on the most important changes and their implications.
         The summary should be concise and structured with headings if needed.";
 
 pub fn base_url(port: u16) -> String {
@@ -21,6 +21,7 @@ pub fn base_url(port: u16) -> String {
 pub fn start(
     port: u16,
     repo_path: String,
+    svg_path: String,
     use_ai: bool,
     gia_browser: bool,
     prompt: Option<String>,
@@ -32,14 +33,16 @@ pub fn start(
         "Diff server listening on http://[::1]:{} (Ctrl+C to stop)",
         actual_port
     );
-    let handle =
-        std::thread::spawn(move || run_server(listener, &repo_path, use_ai, gia_browser, prompt));
+    let handle = std::thread::spawn(move || {
+        run_server(listener, &repo_path, &svg_path, use_ai, gia_browser, prompt)
+    });
     Ok((handle, actual_port))
 }
 
 fn run_server(
     listener: TcpListener,
     repo_path: &str,
+    svg_path: &str,
     use_ai: bool,
     gia_browser: bool,
     prompt: Option<String>,
@@ -48,9 +51,17 @@ fn run_server(
         match stream {
             Ok(stream) => {
                 let repo_clone = repo_path.to_string();
+                let svg_clone = svg_path.to_string();
                 let prompt_clone = prompt.clone();
                 std::thread::spawn(move || {
-                    handle_connection(stream, &repo_clone, use_ai, gia_browser, prompt_clone)
+                    handle_connection(
+                        stream,
+                        &repo_clone,
+                        &svg_clone,
+                        use_ai,
+                        gia_browser,
+                        prompt_clone,
+                    )
                 });
             }
             Err(e) => eprintln!("Connection error: {}", e),
@@ -61,6 +72,7 @@ fn run_server(
 fn handle_connection(
     mut stream: TcpStream,
     repo_path: &str,
+    svg_path: &str,
     use_ai: bool,
     gia_browser: bool,
     prompt: Option<String>,
@@ -85,68 +97,146 @@ fn handle_connection(
         None => (path_and_query, ""),
     };
 
-    if path != "/diff" {
-        send_response(&mut stream, 404, "text/plain", "Not Found");
-        return;
-    }
+    match path {
+        "/view" => {
+            serve_svg(&mut stream, svg_path);
+        }
+        "/checkout" => {
+            let params = parse_query(query);
+            let sha = match params.get("sha") {
+                Some(s) if is_valid_sha(s) => s.clone(),
+                _ => {
+                    send_response(&mut stream, 400, "text/plain", "Invalid or missing 'sha'");
+                    return;
+                }
+            };
+            run_git_checkout(repo_path, &sha);
+            send_response(&mut stream, 200, "text/plain", "OK");
+        }
+        "/diff" => {
+            let params = parse_query(query);
+            let sha1 = match params.get("from") {
+                Some(s) if is_valid_sha(s) => s.clone(),
+                _ => {
+                    send_response(
+                        &mut stream,
+                        400,
+                        "text/plain",
+                        "Invalid or missing 'from' parameter",
+                    );
+                    return;
+                }
+            };
+            let sha2 = match params.get("to") {
+                Some(s) if is_valid_sha(s) => s.clone(),
+                _ => {
+                    send_response(
+                        &mut stream,
+                        400,
+                        "text/plain",
+                        "Invalid or missing 'to' parameter",
+                    );
+                    return;
+                }
+            };
 
-    let params = parse_query(query);
+            run_git_difftool(repo_path, &sha1, &sha2);
 
-    let sha1 = match params.get("from") {
-        Some(s) if is_valid_sha(s) => s.clone(),
+            if !use_ai {
+                send_response(
+                    &mut stream,
+                    200,
+                    "text/html; charset=utf-8",
+                    "<html><body><script>window.close();</script></body></html>",
+                );
+                return;
+            }
+
+            let effective_prompt = prompt.as_deref();
+            if gia_browser {
+                run_gia_browser(repo_path, &sha1, &sha2, effective_prompt);
+                send_response(
+                    &mut stream,
+                    200,
+                    "text/html; charset=utf-8",
+                    "<html><body><script>window.close();</script></body></html>",
+                );
+            } else {
+                let summary = run_gia_diff(repo_path, &sha1, &sha2, effective_prompt);
+                let html = build_html(
+                    &sha1[..sha1.len().min(7)],
+                    &sha2[..sha2.len().min(7)],
+                    &summary,
+                );
+                send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
+            }
+        }
         _ => {
-            send_response(
-                &mut stream,
-                400,
-                "text/plain",
-                "Invalid or missing 'from' parameter",
-            );
+            send_response(&mut stream, 404, "text/plain", "Not Found");
+        }
+    }
+}
+
+fn serve_svg(stream: &mut TcpStream, svg_path: &str) {
+    let svg_content = match std::fs::read_to_string(svg_path) {
+        Ok(c) => c,
+        Err(_) => {
+            send_response(stream, 404, "text/plain", "SVG not yet available");
             return;
         }
     };
-    let sha2 = match params.get("to") {
-        Some(s) if is_valid_sha(s) => s.clone(),
-        _ => {
-            send_response(
-                &mut stream,
-                400,
-                "text/plain",
-                "Invalid or missing 'to' parameter",
-            );
-            return;
-        }
-    };
-
-    run_git_difftool(repo_path, &sha1, &sha2);
-
-    if !use_ai {
-        send_response(
-            &mut stream,
-            200,
-            "text/html; charset=utf-8",
-            "<html><body><script>window.close();</script></body></html>",
-        );
-        return;
-    }
-
-    let effective_prompt = prompt.as_deref();
-    if gia_browser {
-        run_gia_browser(repo_path, &sha1, &sha2, effective_prompt);
-        send_response(
-            &mut stream,
-            200,
-            "text/html; charset=utf-8",
-            "<html><body><script>window.close();</script></body></html>",
-        );
+    // Strip XML declaration / DOCTYPE — only keep from <svg onward
+    let svg_body = if let Some(pos) = svg_content.find("<svg") {
+        &svg_content[pos..]
     } else {
-        let summary = run_gia_diff(repo_path, &sha1, &sha2, effective_prompt);
-        let html = build_html(
-            &sha1[..sha1.len().min(7)],
-            &sha2[..sha2.len().min(7)],
-            &summary,
-        );
-        send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
+        svg_content.as_str()
+    };
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>GGV</title>
+<style>
+  body {{ margin: 0; background: #1a1f2e; overflow: auto; }}
+  svg {{ display: block; }}
+</style>
+</head>
+<body>{}</body>
+</html>"#,
+        svg_body
+    );
+    send_response(stream, 200, "text/html; charset=utf-8", &html);
+}
+
+fn run_git_checkout(repo_path: &str, sha: &str) {
+    // Find a local branch pointing at this SHA and check it out.
+    // Fall back to checking out the SHA directly (detached HEAD).
+    let branch_out = std::process::Command::new("git")
+        .args([
+            "-C",
+            repo_path,
+            "branch",
+            "--points-at",
+            sha,
+            "--format=%(refname:short)",
+        ])
+        .output();
+
+    if let Ok(out) = branch_out {
+        if let Ok(text) = std::str::from_utf8(&out.stdout) {
+            if let Some(branch) = text.lines().find(|l| !l.is_empty()) {
+                let _ = std::process::Command::new("git")
+                    .args(["-C", repo_path, "checkout", branch])
+                    .status();
+                return;
+            }
+        }
     }
+
+    let _ = std::process::Command::new("git")
+        .args(["-C", repo_path, "checkout", sha])
+        .status();
 }
 
 fn is_valid_sha(s: &str) -> bool {
