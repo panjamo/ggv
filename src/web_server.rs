@@ -168,7 +168,7 @@ fn handle_connection(
             if !force_ai {
                 if has_git_diff(repo_path, &sha1, &sha2) {
                     run_git_difftool(repo_path, &sha1, &sha2);
-                } else if !use_ai {
+                } else {
                     send_response(
                         &mut stream,
                         200,
