@@ -389,6 +389,9 @@ window.addEventListener('load', function() {
           ctxMenu.appendChild(makeMenuItem('AI Summary of Changes', function() {
             window.open(wsUrl + '/diff?from=' + fromSha + '&to=' + toSha + '&ai=1', '_blank');
           }));
+          ctxMenu.appendChild(makeMenuItem('AI Summary (log only)', function() {
+            window.open(wsUrl + '/log-summary?from=' + fromSha + '&to=' + toSha, '_blank');
+          }));
           document.body.appendChild(ctxMenu);
         });
       });

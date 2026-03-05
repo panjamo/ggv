@@ -12,6 +12,9 @@ const DEFAULT_BROWSER_PROMPT: &str = "Summarize the changes.
 const DEFAULT_DIFF_PROMPT: &str = "short summarize the git diff output, focus on the most important changes and their implications.
         The summary should be concise and structured with headings if needed.";
 
+const DEFAULT_LOG_PROMPT: &str = "Summarize the commit history. Focus on what changed and why, based on commit messages and file names only.
+        Be concise and structured with headings if needed.";
+
 pub fn base_url(port: u16) -> String {
     format!("http://[::1]:{}", port)
 }
@@ -180,6 +183,41 @@ fn handle_connection(
                 );
             } else {
                 let summary = run_gia_diff(repo_path, &sha1, &sha2, effective_prompt);
+                let html = build_html(
+                    &sha1[..sha1.len().min(7)],
+                    &sha2[..sha2.len().min(7)],
+                    &summary,
+                );
+                send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
+            }
+        }
+        "/log-summary" => {
+            let params = parse_query(query);
+            let sha1 = match params.get("from") {
+                Some(s) if is_valid_sha(s) => s.clone(),
+                _ => {
+                    send_response(&mut stream, 400, "text/plain", "Invalid or missing 'from'");
+                    return;
+                }
+            };
+            let sha2 = match params.get("to") {
+                Some(s) if is_valid_sha(s) => s.clone(),
+                _ => {
+                    send_response(&mut stream, 400, "text/plain", "Invalid or missing 'to'");
+                    return;
+                }
+            };
+            let effective_prompt = prompt.as_deref();
+            if gia_browser {
+                run_gia_log_browser(repo_path, &sha1, &sha2, effective_prompt);
+                send_response(
+                    &mut stream,
+                    200,
+                    "text/html; charset=utf-8",
+                    "<html><body><script>window.close();</script></body></html>",
+                );
+            } else {
+                let summary = run_gia_log(repo_path, &sha1, &sha2, effective_prompt);
                 let html = build_html(
                     &sha1[..sha1.len().min(7)],
                     &sha2[..sha2.len().min(7)],
@@ -486,6 +524,113 @@ fn run_gia_diff(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) -
     let _ = meta_path_str; // suppress unused warning
 
     result
+}
+
+fn run_gia_log(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) -> String {
+    let base = match resolve_diff_base(repo_path, sha1, sha2) {
+        Ok(b) => b,
+        Err(e) => return format!("Error resolving log base: {e}"),
+    };
+
+    let log_range = format!("{}..{}", base, sha2);
+    let log_out = match std::process::Command::new("git")
+        .args([
+            "-C",
+            repo_path,
+            "log",
+            "--pretty=format:commit %H%nRefs: %D%nAuthor: %an <%ae>%nDate: %ci%nSubject: %s%n",
+            "--name-status",
+            &log_range,
+        ])
+        .output()
+    {
+        Ok(out) => out,
+        Err(e) => return format!("Error running git log: {e}"),
+    };
+    if !log_out.status.success() {
+        let stderr = String::from_utf8_lossy(&log_out.stderr).trim().to_string();
+        return format!("git log exited with {}: {}", log_out.status, stderr);
+    }
+    if log_out.stdout.is_empty() {
+        return "No commits found in this range.".to_string();
+    }
+
+    let effective_prompt = prompt.unwrap_or(DEFAULT_LOG_PROMPT);
+    let mut gia = match std::process::Command::new("gia")
+        .arg(effective_prompt)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(e) => return format!("Error starting gia: {e}"),
+    };
+
+    if let Some(mut stdin) = gia.stdin.take() {
+        let _ = stdin.write_all(&log_out.stdout);
+    }
+
+    match gia.wait_with_output() {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if stdout.is_empty() {
+                String::from_utf8_lossy(&out.stderr).trim().to_string()
+            } else {
+                stdout
+            }
+        }
+        Err(e) => format!("Error waiting for gia: {e}"),
+    }
+}
+
+fn run_gia_log_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) {
+    let base = match resolve_diff_base(repo_path, sha1, sha2) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("Error resolving log base: {e}");
+            return;
+        }
+    };
+
+    let log_range = format!("{}..{}", base, sha2);
+    let log_out = match std::process::Command::new("git")
+        .args([
+            "-C",
+            repo_path,
+            "log",
+            "--pretty=format:commit %H%nRefs: %D%nAuthor: %an <%ae>%nDate: %ci%nSubject: %s%n",
+            "--name-status",
+            &log_range,
+        ])
+        .output()
+    {
+        Ok(out) => out,
+        Err(e) => {
+            eprintln!("git log error: {e}");
+            return;
+        }
+    };
+
+    let effective_prompt = prompt.unwrap_or(DEFAULT_LOG_PROMPT);
+    let mut gia = match std::process::Command::new("gia")
+        .args(["-b", effective_prompt])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(e) => {
+            eprintln!("gia error: {e}");
+            return;
+        }
+    };
+
+    if let Some(mut stdin) = gia.stdin.take() {
+        let _ = stdin.write_all(&log_out.stdout);
+    }
+    let _ = gia.wait();
 }
 
 fn html_escape(s: &str) -> String {
