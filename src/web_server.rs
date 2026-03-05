@@ -15,6 +15,13 @@ const DEFAULT_DIFF_PROMPT: &str = "short summarize the git diff output, focus on
 const DEFAULT_LOG_PROMPT: &str = "Summarize the commit history. Focus on what changed and why, based on commit messages and file names only.
         Be concise and structured with headings if needed.";
 
+/// Git log format used as metadata context when feeding diffs to the AI.
+const GIT_LOG_METADATA_FORMAT: &str =
+    "--pretty=format:commit %H%nRefs: %D%nAuthor: %an <%ae>%nDate: %ci%nSubject: %s%n";
+
+/// Minimal HTML page that closes itself — sent after fire-and-forget browser actions.
+const HTML_CLOSE_WINDOW: &str = "<html><body><script>window.close();</script></body></html>";
+
 pub fn base_url(port: u16) -> String {
     format!("http://[::1]:{}", port)
 }
@@ -167,7 +174,7 @@ fn handle_connection(
                     &mut stream,
                     200,
                     "text/html; charset=utf-8",
-                    "<html><body><script>window.close();</script></body></html>",
+                    HTML_CLOSE_WINDOW,
                 );
                 return;
             }
@@ -179,7 +186,7 @@ fn handle_connection(
                     &mut stream,
                     200,
                     "text/html; charset=utf-8",
-                    "<html><body><script>window.close();</script></body></html>",
+                    HTML_CLOSE_WINDOW,
                 );
             } else {
                 let summary = run_gia_diff(repo_path, &sha1, &sha2, effective_prompt);
@@ -214,7 +221,7 @@ fn handle_connection(
                     &mut stream,
                     200,
                     "text/html; charset=utf-8",
-                    "<html><body><script>window.close();</script></body></html>",
+                    HTML_CLOSE_WINDOW,
                 );
             } else {
                 let summary = run_gia_log(repo_path, &sha1, &sha2, effective_prompt);
@@ -413,7 +420,7 @@ fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>
             "-C",
             repo_path,
             "log",
-            "--pretty=format:commit %H%nRefs: %D%nAuthor: %an <%ae>%nDate: %ci%nSubject: %s%n",
+            GIT_LOG_METADATA_FORMAT,
             "--name-status",
             &log_range,
         ])
@@ -516,7 +523,7 @@ fn run_gia_diff(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) -
             "-C",
             repo_path,
             "log",
-            "--pretty=format:commit %H%nRefs: %D%nAuthor: %an <%ae>%nDate: %ci%nSubject: %s%n",
+            GIT_LOG_METADATA_FORMAT,
             "--name-status",
             &log_range,
         ])
@@ -536,13 +543,10 @@ fn run_gia_diff(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) -
     let has_meta = !metadata.is_empty() && std::fs::write(&meta_path, &metadata).is_ok();
 
     let effective_prompt = prompt.unwrap_or(DEFAULT_DIFF_PROMPT);
-    let mut gia_args: Vec<&str> = vec![effective_prompt];
-    let meta_path_str;
+    let mut gia_args: Vec<String> = vec![effective_prompt.to_string()];
     if has_meta {
-        meta_path_str = meta_path.to_string_lossy().into_owned();
-        gia_args.extend_from_slice(&["-f", &meta_path_str]);
-    } else {
-        meta_path_str = String::new();
+        gia_args.push("-f".to_string());
+        gia_args.push(meta_path.to_string_lossy().into_owned());
     }
 
     let mut gia = match std::process::Command::new("gia")
@@ -575,7 +579,6 @@ fn run_gia_diff(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) -
     if has_meta {
         let _ = std::fs::remove_file(&meta_path);
     }
-    let _ = meta_path_str; // suppress unused warning
 
     result
 }
@@ -592,7 +595,7 @@ fn run_gia_log(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) ->
             "-C",
             repo_path,
             "log",
-            "--pretty=format:commit %H%nRefs: %D%nAuthor: %an <%ae>%nDate: %ci%nSubject: %s%n",
+            GIT_LOG_METADATA_FORMAT,
             "--name-status",
             &log_range,
         ])
@@ -653,7 +656,7 @@ fn run_gia_log_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&
             "-C",
             repo_path,
             "log",
-            "--pretty=format:commit %H%nRefs: %D%nAuthor: %an <%ae>%nDate: %ci%nSubject: %s%n",
+            GIT_LOG_METADATA_FORMAT,
             "--name-status",
             &log_range,
         ])

@@ -11,7 +11,6 @@ pub struct CommitNode {
     tags: BTreeSet<String>,
     refs: BTreeSet<String>,
     is_tip: bool,
-    _parents: Vec<String>,
     branch_readme: Option<String>,
     is_current_checkout: bool,
 }
@@ -30,7 +29,6 @@ impl CommitNode {
         let _short_id = format!("{:.7}", id);
         let _message = commit.message().unwrap_or("").to_string();
         let timestamp = commit.time().seconds();
-        let _parents: Vec<String> = commit.parent_ids().map(|oid| oid.to_string()).collect();
 
         Self {
             id,
@@ -40,7 +38,6 @@ impl CommitNode {
             tags: BTreeSet::new(),
             refs: BTreeSet::new(),
             is_tip: false,
-            _parents,
             branch_readme: None,
             is_current_checkout: false,
         }
