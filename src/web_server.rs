@@ -226,6 +226,25 @@ fn handle_connection(
                 send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
             }
         }
+        "/log" => {
+            let params = parse_query(query);
+            let sha1 = match params.get("from") {
+                Some(s) if is_valid_sha(s) => s.clone(),
+                _ => {
+                    send_response(&mut stream, 400, "text/plain", "Invalid or missing 'from'");
+                    return;
+                }
+            };
+            let sha2 = match params.get("to") {
+                Some(s) if is_valid_sha(s) => s.clone(),
+                _ => {
+                    send_response(&mut stream, 400, "text/plain", "Invalid or missing 'to'");
+                    return;
+                }
+            };
+            let html = serve_git_log(repo_path, &sha1, &sha2);
+            send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
+        }
         _ => {
             send_response(&mut stream, 404, "text/plain", "Not Found");
         }
@@ -631,6 +650,89 @@ fn run_gia_log_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&
         let _ = stdin.write_all(&log_out.stdout);
     }
     let _ = gia.wait();
+}
+
+fn serve_git_log(repo_path: &str, sha1: &str, sha2: &str) -> String {
+    let base = match resolve_diff_base(repo_path, sha1, sha2) {
+        Ok(b) => b,
+        Err(e) => return format!("<pre>Error resolving log base: {}</pre>", html_escape(&e)),
+    };
+
+    let log_range = format!("{}..{}", base, sha2);
+    let out = match std::process::Command::new("git")
+        .args([
+            "-C",
+            repo_path,
+            "log",
+            "--pretty=format:commit %H%nAuthor: %an <%ae>%nDate:   %ci%nRefs:   %D%n%n    %s%n%n    %b",
+            &log_range,
+        ])
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => {
+            return format!(
+                "<pre>Error running git log: {}</pre>",
+                html_escape(&e.to_string())
+            )
+        }
+    };
+
+    let text = if out.stdout.is_empty() {
+        "No commits found in this range.".to_string()
+    } else {
+        String::from_utf8_lossy(&out.stdout).to_string()
+    };
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Git Log</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
+    background: #0f1117;
+    color: #e2e8f0;
+    padding: 24px;
+    font-size: 13px;
+    line-height: 1.6;
+  }}
+  h1 {{ font-size: 15px; color: #63b3ed; margin-bottom: 16px; font-family: "Segoe UI", sans-serif; }}
+  .shas {{
+    font-size: 12px;
+    color: #718096;
+    margin-bottom: 20px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-family: "Segoe UI", sans-serif;
+  }}
+  .sha {{ background: #2d3748; padding: 2px 8px; border-radius: 4px; color: #a0aec0; }}
+  .arrow {{ color: #4a5568; }}
+  pre {{
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: #cbd5e0;
+  }}
+</style>
+</head>
+<body>
+<h1>Git Log</h1>
+<div class="shas">
+  <span class="sha">{sha1}</span>
+  <span class="arrow">&#8594;</span>
+  <span class="sha">{sha2}</span>
+</div>
+<pre>{log}</pre>
+</body>
+</html>"#,
+        sha1 = &sha1[..sha1.len().min(7)],
+        sha2 = &sha2[..sha2.len().min(7)],
+        log = html_escape(&text),
+    )
 }
 
 fn html_escape(s: &str) -> String {

@@ -392,6 +392,9 @@ window.addEventListener('load', function() {
           ctxMenu.appendChild(makeMenuItem('AI Summary (log only)', function() {
             window.open(wsUrl + '/log-summary?from=' + fromSha + '&to=' + toSha, '_blank');
           }));
+          ctxMenu.appendChild(makeMenuItem('Show Git Log', function() {
+            window.open(wsUrl + '/log?from=' + fromSha + '&to=' + toSha, '_blank');
+          }));
           document.body.appendChild(ctxMenu);
         });
       });
