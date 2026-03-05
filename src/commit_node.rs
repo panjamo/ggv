@@ -280,14 +280,19 @@ impl CommitNode {
         if self.is_current_checkout {
             label = format!("CURRENT\\n{}", label);
         }
-        if let Some(readme) = &self.branch_readme {
-            let escaped_readme = readme
-                .split("\\n")
-                .map(dot_escape)
-                .collect::<Vec<_>>()
-                .join("\\n");
-            label = format!("{}\\n{}", label, escaped_readme);
+        if self.branch_readme.is_some() {
+            label.push_str("\\n📝");
         }
+
+        let tooltip_attr = if let Some(readme) = &self.branch_readme {
+            let escaped = readme
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n");
+            format!(", tooltip=\"{}\"", escaped)
+        } else {
+            String::new()
+        };
 
         let style = if colors.dashed {
             "dashed,filled"
@@ -305,8 +310,8 @@ impl CommitNode {
         let font_size: u8 = if colors.dashed { 8 } else { 9 };
 
         format!(
-            "\"{}\" [id=\"{}\", label=\"{}\", shape=box, style=\"{}\", color=\"{}\", fillcolor=\"{}\", fontname=\"Arial\", fontsize={}, fontcolor=\"{}\", penwidth={}, width=0.9, height=0.4]",
-            self.id, node_id, label, style, colors.border, colors.fill, font_size, colors.font, penwidth
+            "\"{}\" [id=\"{}\", label=\"{}\", shape=box, style=\"{}\", color=\"{}\", fillcolor=\"{}\", fontname=\"Arial\", fontsize={}, fontcolor=\"{}\", penwidth={}, width=0.9, height=0.4{}]",
+            self.id, node_id, label, style, colors.border, colors.fill, font_size, colors.font, penwidth, tooltip_attr
         )
     }
 }

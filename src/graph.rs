@@ -476,43 +476,14 @@ impl GitGraphviz {
                             if let Some(entry) = tree.get_name("BRANCHREADME.md") {
                                 if let Ok(blob) = self.repo.find_blob(entry.id()) {
                                     if let Ok(content) = std::str::from_utf8(blob.content()) {
-                                        if let Some(first_line) = content.lines().next() {
-                                            if !first_line.trim().is_empty() {
-                                                if let Some(commit_node) =
-                                                    all_commits.get_mut(commit_id)
-                                                {
-                                                    let wrapped = if first_line.len() > 30 {
-                                                        let words: Vec<&str> =
-                                                            first_line.split_whitespace().collect();
-                                                        let mut lines = Vec::new();
-                                                        let mut current_line = String::new();
-
-                                                        for word in words {
-                                                            if current_line.len() + word.len() + 1
-                                                                > 30
-                                                            {
-                                                                if !current_line.is_empty() {
-                                                                    lines.push(current_line);
-                                                                    current_line = word.to_string();
-                                                                } else {
-                                                                    lines.push(word.to_string());
-                                                                }
-                                                            } else {
-                                                                if !current_line.is_empty() {
-                                                                    current_line.push(' ');
-                                                                }
-                                                                current_line.push_str(word);
-                                                            }
-                                                        }
-                                                        if !current_line.is_empty() {
-                                                            lines.push(current_line);
-                                                        }
-                                                        lines.join("\\n")
-                                                    } else {
-                                                        first_line.to_string()
-                                                    };
-                                                    commit_node.set_branch_readme(wrapped);
-                                                }
+                                        let description: String =
+                                            content.lines().take(10).collect::<Vec<_>>().join("\n");
+                                        let trimmed = description.trim().to_string();
+                                        if !trimmed.is_empty() {
+                                            if let Some(commit_node) =
+                                                all_commits.get_mut(commit_id)
+                                            {
+                                                commit_node.set_branch_readme(trimmed);
                                             }
                                         }
                                     }
