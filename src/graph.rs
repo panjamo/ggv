@@ -289,7 +289,7 @@ impl GitGraphviz {
         )?;
         writeln!(
             writer,
-            "  edge [color=\"{}\", penwidth=1.5, arrowsize=0.7, arrowhead=vee];",
+            "  edge [color=\"{}\", penwidth=2.5, arrowsize=0.9, arrowhead=vee];",
             tc.edge_color
         )?;
         let graph_tooltip = build_graph_tooltip(&self.repo)
