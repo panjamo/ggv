@@ -340,9 +340,35 @@ fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>
     let _ = gia.wait();
 }
 
+fn resolve_diff_base(repo_path: &str, sha1: &str, sha2: &str) -> String {
+    // Check if sha1 is a direct ancestor of sha2
+    let is_ancestor = std::process::Command::new("git")
+        .args(["-C", repo_path, "merge-base", "--is-ancestor", sha1, sha2])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if is_ancestor {
+        return sha1.to_string();
+    }
+    // Fall back to merge-base
+    if let Ok(out) = std::process::Command::new("git")
+        .args(["-C", repo_path, "merge-base", sha1, sha2])
+        .output()
+    {
+        let mb = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !mb.is_empty() {
+            return mb;
+        }
+    }
+    sha1.to_string()
+}
+
 fn run_gia_diff(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) -> String {
+    let base = resolve_diff_base(repo_path, sha1, sha2);
+
+    // Snapshot diff: diff(base, sha2)
     let diff = match std::process::Command::new("git")
-        .args(["-C", repo_path, "diff", sha1, sha2])
+        .args(["-C", repo_path, "diff", &base, sha2])
         .output()
     {
         Ok(out) => out.stdout,
@@ -353,10 +379,38 @@ fn run_gia_diff(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) -
         return "No differences found between these commits.".to_string();
     }
 
+    // Commit metadata: log(base..sha2) with branch/tag decorations
+    let log_range = format!("{}..{}", base, sha2);
+    let metadata = std::process::Command::new("git")
+        .args([
+            "-C",
+            repo_path,
+            "log",
+            "--pretty=format:commit %H%nRefs: %D%nAuthor: %an <%ae>%nDate: %ci%nSubject: %s%n",
+            "--name-status",
+            &log_range,
+        ])
+        .output()
+        .map(|o| o.stdout)
+        .unwrap_or_default();
+
+    // Write metadata to a temp file for gia -f
+    let meta_path = std::env::temp_dir().join("ggv_meta.txt");
+    let has_meta = !metadata.is_empty() && std::fs::write(&meta_path, &metadata).is_ok();
+
     let effective_prompt = prompt.unwrap_or(DEFAULT_DIFF_PROMPT);
 
+    let mut gia_args: Vec<&str> = vec![effective_prompt];
+    let meta_path_str;
+    if has_meta {
+        meta_path_str = meta_path.to_string_lossy().into_owned();
+        gia_args.extend_from_slice(&["-f", &meta_path_str]);
+    } else {
+        meta_path_str = String::new();
+    }
+
     let mut gia = match std::process::Command::new("gia")
-        .args(["-c", effective_prompt])
+        .args(&gia_args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -370,7 +424,7 @@ fn run_gia_diff(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) -
         let _ = stdin.write_all(&diff);
     }
 
-    match gia.wait_with_output() {
+    let result = match gia.wait_with_output() {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if stdout.is_empty() {
@@ -380,7 +434,14 @@ fn run_gia_diff(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) -
             }
         }
         Err(e) => format!("Error waiting for gia: {e}"),
+    };
+
+    if has_meta {
+        let _ = std::fs::remove_file(&meta_path);
     }
+    let _ = meta_path_str; // suppress unused warning
+
+    result
 }
 
 fn html_escape(s: &str) -> String {
