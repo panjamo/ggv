@@ -153,9 +153,13 @@ fn handle_connection(
                 }
             };
 
-            run_git_difftool(repo_path, &sha1, &sha2);
+            let force_ai = params.get("ai").map(|v| v == "1").unwrap_or(false);
 
-            if !use_ai {
+            if !force_ai {
+                run_git_difftool(repo_path, &sha1, &sha2);
+            }
+
+            if !use_ai && !force_ai {
                 send_response(
                     &mut stream,
                     200,
@@ -166,7 +170,7 @@ fn handle_connection(
             }
 
             let effective_prompt = prompt.as_deref();
-            if gia_browser {
+            if gia_browser && !force_ai {
                 run_gia_browser(repo_path, &sha1, &sha2, effective_prompt);
                 send_response(
                     &mut stream,

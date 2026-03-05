@@ -358,6 +358,29 @@ window.addEventListener('load', function() {
         document.body.appendChild(ctxMenu);
       });
     });
+    // Right-click context menu on edge count labels
+    document.querySelectorAll('g.edge').forEach(function(g) {
+      var title = g.querySelector('title');
+      if (!title) return;
+      var m = title.textContent.match(/^([0-9a-f]{40})->([0-9a-f]{40})$/);
+      if (!m) return;
+      var fromSha = m[1], toSha = m[2];
+      g.querySelectorAll('text').forEach(function(t) {
+        if (!/^\d+$/.test(t.textContent.trim())) return;
+        t.addEventListener('contextmenu', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          removeCtxMenu();
+          ctxMenu = document.createElement('div');
+          ctxMenu.style.cssText = 'position:fixed;left:' + e.clientX + 'px;top:' + e.clientY + 'px;background:#1a1f2e;border:1px solid #2d3748;border-radius:8px;padding:4px 0;z-index:9999;min-width:200px;box-shadow:0 8px 24px rgba(0,0,0,0.6);font-family:"Segoe UI",sans-serif;';
+          ctxMenu.addEventListener('click', function(ev) { ev.stopPropagation(); });
+          ctxMenu.appendChild(makeMenuItem('AI Summary of Changes', function() {
+            window.open(wsUrl + '/diff?from=' + fromSha + '&to=' + toSha + '&ai=1', '_blank');
+          }));
+          document.body.appendChild(ctxMenu);
+        });
+      });
+    });
   }
 });
 //]]>
