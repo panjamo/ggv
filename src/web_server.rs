@@ -388,8 +388,16 @@ fn run_git_difftool(repo_path: &str, sha1: &str, sha2: &str) {
 }
 
 fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) {
+    let base = match resolve_diff_base(repo_path, sha1, sha2) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("Error resolving diff base: {e}");
+            return;
+        }
+    };
+
     let diff = match std::process::Command::new("git")
-        .args(["-C", repo_path, "diff", sha1, sha2])
+        .args(["-C", repo_path, "diff", &base, sha2])
         .output()
     {
         Ok(out) => out.stdout,
@@ -399,9 +407,32 @@ fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>
         }
     };
 
+    let log_range = format!("{}..{}", base, sha2);
+    let log_out = std::process::Command::new("git")
+        .args([
+            "-C",
+            repo_path,
+            "log",
+            "--pretty=format:commit %H%nRefs: %D%nAuthor: %an <%ae>%nDate: %ci%nSubject: %s%n",
+            "--name-status",
+            &log_range,
+        ])
+        .output()
+        .ok();
+    let metadata = log_out.map(|o| o.stdout).unwrap_or_default();
+
+    let meta_path = std::env::temp_dir().join("ggv_meta_browser.txt");
+    let has_meta = !metadata.is_empty() && std::fs::write(&meta_path, &metadata).is_ok();
+
     let effective_prompt = prompt.unwrap_or(DEFAULT_BROWSER_PROMPT);
+    let mut gia_args: Vec<String> = vec!["-b".to_string(), effective_prompt.to_string()];
+    if has_meta {
+        gia_args.push("-f".to_string());
+        gia_args.push(meta_path.to_string_lossy().into_owned());
+    }
+
     let mut gia = match std::process::Command::new("gia")
-        .args(["-b", effective_prompt])
+        .args(&gia_args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -419,6 +450,10 @@ fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>
     }
     // fire-and-forget: gia opens its own window
     let _ = gia.wait();
+
+    if has_meta {
+        let _ = std::fs::remove_file(&meta_path);
+    }
 }
 
 fn resolve_diff_base(repo_path: &str, sha1: &str, sha2: &str) -> Result<String, String> {

@@ -380,8 +380,8 @@ window.addEventListener('load', function() {
           var pinShort = pinSha.slice(0, 7);
           var myTop = g.getBoundingClientRect().top;
           var pTop = pinEl ? pinEl.getBoundingClientRect().top : 0;
-          var fromSha2 = pTop > myTop ? sha : pinSha;
-          var toSha2   = pTop > myTop ? pinSha : sha;
+          var fromSha2 = pTop > myTop ? pinSha : sha;
+          var toSha2   = pTop > myTop ? sha : pinSha;
           ctxMenu.appendChild(makeMenuItem('Compare with ' + pinShort + '\u2026', function() {
             window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2, '_blank');
           }));
