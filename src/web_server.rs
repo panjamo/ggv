@@ -154,6 +154,7 @@ fn handle_connection(
             };
 
             let force_ai = params.get("ai").map(|v| v == "1").unwrap_or(false);
+            let include_log = !params.get("nolog").map(|v| v == "1").unwrap_or(false);
 
             if !force_ai {
                 if has_git_diff(repo_path, &sha1, &sha2) {
@@ -198,7 +199,7 @@ fn handle_connection(
                     HTML_CLOSE_WINDOW,
                 );
             } else {
-                let summary = run_gia_diff(repo_path, &sha1, &sha2, effective_prompt);
+                let summary = run_gia_diff(repo_path, &sha1, &sha2, effective_prompt, include_log);
                 let html = build_html(
                     &sha1[..sha1.len().min(7)],
                     &sha2[..sha2.len().min(7)],
@@ -416,6 +417,27 @@ fn parse_query(query: &str) -> HashMap<String, String> {
 }
 
 
+fn git_log_metadata(
+    repo_path: &str,
+    base: &str,
+    sha1: &str,
+    sha2: &str,
+) -> std::io::Result<std::process::Output> {
+    let exclude_base = format!("^{}", base);
+    std::process::Command::new("git")
+        .args([
+            "-C",
+            repo_path,
+            "log",
+            GIT_LOG_METADATA_FORMAT,
+            "--name-status",
+            &exclude_base,
+            sha1,
+            sha2,
+        ])
+        .output()
+}
+
 fn has_git_diff(repo_path: &str, sha1: &str, sha2: &str) -> bool {
     std::process::Command::new("git")
         .args(["-C", repo_path, "diff", "--quiet", sha1, sha2])
@@ -466,21 +488,9 @@ fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>
         }
     };
 
-    let exclude_base = format!("^{}", base);
-    let log_out = std::process::Command::new("git")
-        .args([
-            "-C",
-            repo_path,
-            "log",
-            GIT_LOG_METADATA_FORMAT,
-            "--name-status",
-            &exclude_base,
-            sha1,
-            sha2,
-        ])
-        .output()
-        .ok();
-    let metadata = log_out.map(|o| o.stdout).unwrap_or_default();
+    let metadata = git_log_metadata(repo_path, &base, sha1, sha2)
+        .map(|o| o.stdout)
+        .unwrap_or_default();
 
     let meta_path = std::env::temp_dir().join("ggv_meta_browser.txt");
     let has_meta = !metadata.is_empty() && std::fs::write(&meta_path, &metadata).is_ok();
@@ -546,7 +556,7 @@ fn resolve_diff_base(repo_path: &str, sha1: &str, sha2: &str) -> Result<String, 
     Ok(mb)
 }
 
-fn run_gia_diff(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) -> String {
+fn run_gia_diff(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>, include_log: bool) -> String {
     let base = match resolve_diff_base(repo_path, sha1, sha2) {
         Ok(b) => b,
         Err(e) => return format!("Error resolving diff base: {e}"),
@@ -571,32 +581,20 @@ fn run_gia_diff(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) -
     }
 
     // Commit metadata: log(both sides relative to base) with branch/tag decorations
-    let exclude_base = format!("^{}", base);
-    let log_out = match std::process::Command::new("git")
-        .args([
-            "-C",
-            repo_path,
-            "log",
-            GIT_LOG_METADATA_FORMAT,
-            "--name-status",
-            &exclude_base,
-            sha1,
-            sha2,
-        ])
-        .output()
-    {
-        Ok(out) => out,
-        Err(e) => return format!("Error running git log: {e}"),
-    };
-    if !log_out.status.success() {
-        let stderr = String::from_utf8_lossy(&log_out.stderr).trim().to_string();
-        return format!("git log exited with {}: {}", log_out.status, stderr);
-    }
-    let metadata = log_out.stdout;
-
-    // Write metadata to a temp file for gia -f
     let meta_path = std::env::temp_dir().join("ggv_meta.txt");
-    let has_meta = !metadata.is_empty() && std::fs::write(&meta_path, &metadata).is_ok();
+    let has_meta = if include_log {
+        let log_out = match git_log_metadata(repo_path, &base, sha1, sha2) {
+            Ok(out) => out,
+            Err(e) => return format!("Error running git log: {e}"),
+        };
+        if !log_out.status.success() {
+            let stderr = String::from_utf8_lossy(&log_out.stderr).trim().to_string();
+            return format!("git log exited with {}: {}", log_out.status, stderr);
+        }
+        !log_out.stdout.is_empty() && std::fs::write(&meta_path, &log_out.stdout).is_ok()
+    } else {
+        false
+    };
 
     let effective_prompt = prompt.unwrap_or(DEFAULT_DIFF_PROMPT);
     let mut gia_args: Vec<String> = vec![effective_prompt.to_string()];
@@ -645,20 +643,7 @@ fn run_gia_log(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) ->
         Err(e) => return format!("Error resolving log base: {e}"),
     };
 
-    let exclude_base = format!("^{}", base);
-    let log_out = match std::process::Command::new("git")
-        .args([
-            "-C",
-            repo_path,
-            "log",
-            GIT_LOG_METADATA_FORMAT,
-            "--name-status",
-            &exclude_base,
-            sha1,
-            sha2,
-        ])
-        .output()
-    {
+    let log_out = match git_log_metadata(repo_path, &base, sha1, sha2) {
         Ok(out) => out,
         Err(e) => return format!("Error running git log: {e}"),
     };
@@ -708,20 +693,7 @@ fn run_gia_log_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&
         }
     };
 
-    let exclude_base = format!("^{}", base);
-    let log_out = match std::process::Command::new("git")
-        .args([
-            "-C",
-            repo_path,
-            "log",
-            GIT_LOG_METADATA_FORMAT,
-            "--name-status",
-            &exclude_base,
-            sha1,
-            sha2,
-        ])
-        .output()
-    {
+    let log_out = match git_log_metadata(repo_path, &base, sha1, sha2) {
         Ok(out) => out,
         Err(e) => {
             eprintln!("git log error: {e}");
