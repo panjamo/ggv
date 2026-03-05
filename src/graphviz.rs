@@ -119,7 +119,6 @@ fn inject_interactive_js(
     let content = std::fs::read_to_string(svg_path)
         .with_context(|| format!("Failed to read SVG: {}", svg_path))?;
 
-    // Build the JS forge URL literal: "https://..." or null
     let forge_url_js = match forge_url {
         Some(url) => {
             let escaped = url.replace('\\', "\\\\").replace('"', "\\\"");
@@ -137,7 +136,6 @@ fn inject_interactive_js(
         None => "null".to_string(),
     };
 
-    // FORGE_URL_PLACEHOLDER is replaced at runtime with the actual JS value
     let script_template = r#"<script type="text/ecmascript">
 //<![CDATA[
 function copyHash(el) {
@@ -172,100 +170,92 @@ window.addEventListener('load', function() {
       }
     });
   });
-  // Drag-to-compare: drag one node onto another to open compare view
+  // Drag-to-compare: drag one node onto another to open forge compare view
   var forgeUrl = FORGE_URL_PLACEHOLDER;
-  var wsUrl2 = WS_URL_PLACEHOLDER;
-  if (!forgeUrl && !wsUrl2) return;
-  // Switch nodes to grab cursor to signal draggability
-  document.querySelectorAll('g.node').forEach(function(g) { g.style.cursor = 'grab'; });
-  var drag = null;
-  var hlTarget = null, hlStrokes = [];
-  function clearHL() {
-    if (!hlTarget) return;
-    hlTarget.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s, i) {
-      if (hlStrokes[i] !== undefined) s.setAttribute('stroke', hlStrokes[i]);
-    });
-    hlTarget = null; hlStrokes = [];
-  }
-  function setHL(g) {
-    clearHL(); hlTarget = g;
-    g.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s) {
-      hlStrokes.push(s.getAttribute('stroke') || '');
-      s.setAttribute('stroke', '#3B82F6');
-    });
-  }
-  function nodeAt(x, y, skip) {
-    var els = document.elementsFromPoint(x, y);
-    for (var i = 0; i < els.length; i++) {
-      var g = els[i].closest && els[i].closest('g.node');
-      if (g && g !== skip) return g;
+  if (forgeUrl) {
+    document.querySelectorAll('g.node').forEach(function(g) { g.style.cursor = 'grab'; });
+    var drag = null;
+    var hlTarget = null, hlStrokes = [];
+    function clearHL() {
+      if (!hlTarget) return;
+      hlTarget.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s, i) {
+        if (hlStrokes[i] !== undefined) s.setAttribute('stroke', hlStrokes[i]);
+      });
+      hlTarget = null; hlStrokes = [];
     }
-    return null;
-  }
-  document.querySelectorAll('g.node').forEach(function(g) {
-    g.addEventListener('pointerdown', function(e) {
-      if (e.button !== 0) return;
-      var t = g.querySelector('title');
-      if (!t) return;
-      var sha = t.textContent.trim();
-      if (!/^[0-9a-f]{40}$/.test(sha)) return;
-      drag = {sha: sha, el: g, x0: e.clientX, y0: e.clientY, moved: false};
-      e.preventDefault();
+    function setHL(g) {
+      clearHL(); hlTarget = g;
+      g.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s) {
+        hlStrokes.push(s.getAttribute('stroke') || '');
+        s.setAttribute('stroke', '#3B82F6');
+      });
+    }
+    function nodeAt(x, y, skip) {
+      var els = document.elementsFromPoint(x, y);
+      for (var i = 0; i < els.length; i++) {
+        var g = els[i].closest && els[i].closest('g.node');
+        if (g && g !== skip) return g;
+      }
+      return null;
+    }
+    document.querySelectorAll('g.node').forEach(function(g) {
+      g.addEventListener('pointerdown', function(e) {
+        if (e.button !== 0) return;
+        var t = g.querySelector('title');
+        if (!t) return;
+        var sha = t.textContent.trim();
+        if (!/^[0-9a-f]{40}$/.test(sha)) return;
+        drag = {sha: sha, el: g, x0: e.clientX, y0: e.clientY, moved: false};
+        e.preventDefault();
+      });
     });
-  });
-  document.addEventListener('pointermove', function(e) {
-    if (!drag) return;
-    var dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
-    if (!drag.moved && Math.sqrt(dx*dx + dy*dy) > 6) {
-      drag.moved = true;
-      drag.el.style.opacity = '0.5';
-      document.documentElement.style.cursor = 'crosshair';
-    }
-    if (drag.moved) {
-      var target = nodeAt(e.clientX, e.clientY, drag.el);
-      if (target) setHL(target); else clearHL();
-    }
-  });
-  document.addEventListener('pointerup', function(e) {
-    if (!drag) return;
-    var wasMoved = drag.moved;
-    drag.el.style.opacity = '';
-    document.documentElement.style.cursor = '';
-    clearHL();
-    if (wasMoved) {
-      window._dragJustHappened = true;
-      var target = nodeAt(e.clientX, e.clientY, drag.el);
-      if (target) {
-        var t = target.querySelector('title');
-        if (t) {
-          var tsha = t.textContent.trim();
-          if (/^[0-9a-f]{40}$/.test(tsha)) {
-            // In a BT graph, nodes lower on screen are older commits.
-            // Always build the URL as older...newer regardless of drag direction.
-            var dragY = drag.el.getBoundingClientRect().top;
-            var targetY = target.getBoundingClientRect().top;
-            var fromSha = dragY > targetY ? drag.sha : tsha;
-            var toSha   = dragY > targetY ? tsha : drag.sha;
-            if ((e.ctrlKey) && wsUrl2) {
-              // Ctrl + drag → AI diff server
-              window.open(wsUrl2 + '/diff?from=' + fromSha + '&to=' + toSha, '_blank');
-            } else if (forgeUrl) {
+    document.addEventListener('pointermove', function(e) {
+      if (!drag) return;
+      var dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+      if (!drag.moved && Math.sqrt(dx*dx + dy*dy) > 6) {
+        drag.moved = true;
+        drag.el.style.opacity = '0.5';
+        document.documentElement.style.cursor = 'crosshair';
+      }
+      if (drag.moved) {
+        var target = nodeAt(e.clientX, e.clientY, drag.el);
+        if (target) setHL(target); else clearHL();
+      }
+    });
+    document.addEventListener('pointerup', function(e) {
+      if (!drag) return;
+      var wasMoved = drag.moved;
+      drag.el.style.opacity = '';
+      document.documentElement.style.cursor = '';
+      clearHL();
+      if (wasMoved) {
+        window._dragJustHappened = true;
+        var target = nodeAt(e.clientX, e.clientY, drag.el);
+        if (target) {
+          var t = target.querySelector('title');
+          if (t) {
+            var tsha = t.textContent.trim();
+            if (/^[0-9a-f]{40}$/.test(tsha)) {
+              var dragY = drag.el.getBoundingClientRect().top;
+              var targetY = target.getBoundingClientRect().top;
+              var fromSha = dragY > targetY ? drag.sha : tsha;
+              var toSha   = dragY > targetY ? tsha : drag.sha;
               var seg = forgeUrl.indexOf('github.com') >= 0 ? '/compare/' : '/-/compare/';
               window.open(forgeUrl + seg + fromSha + '...' + toSha, '_blank');
             }
           }
         }
       }
-    }
-    drag = null;
-  });
-  document.addEventListener('pointercancel', function() {
-    if (!drag) return;
-    drag.el.style.opacity = '';
-    document.documentElement.style.cursor = '';
-    clearHL();
-    drag = null;
-  });
+      drag = null;
+    });
+    document.addEventListener('pointercancel', function() {
+      if (!drag) return;
+      drag.el.style.opacity = '';
+      document.documentElement.style.cursor = '';
+      clearHL();
+      drag = null;
+    });
+  }
   // Diff server: make edge count labels clickable
   var wsUrl = WS_URL_PLACEHOLDER;
   if (wsUrl) {
@@ -318,6 +308,24 @@ window.addEventListener('load', function() {
       var tm = id.match(/~T~([^~]*)/); if (tm) tags   = tm[1].split(',').filter(Boolean);
       return { local: local, remote: remote, tags: tags };
     }
+    var pinSha = null;
+    var pinEl = null;
+    var pinStrokes = [];
+    function setPinHL(g) {
+      clearPinHL();
+      pinEl = g;
+      g.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s) {
+        pinStrokes.push(s.getAttribute('stroke') || '');
+        s.setAttribute('stroke', '#f59e0b');
+      });
+    }
+    function clearPinHL() {
+      if (!pinEl) return;
+      pinEl.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s, i) {
+        if (pinStrokes[i] !== undefined) s.setAttribute('stroke', pinStrokes[i]);
+      });
+      pinEl = null; pinStrokes = [];
+    }
     document.querySelectorAll('g.node').forEach(function(g) {
       g.addEventListener('contextmenu', function(e) {
         e.preventDefault();
@@ -366,6 +374,28 @@ window.addEventListener('load', function() {
               fetch(wsUrl + '/delete-branch?name=' + encodeURIComponent(name) + '&scope=remote');
             }));
           });
+        }
+        ctxMenu.appendChild(makeDivider());
+        if (pinSha && pinSha !== sha) {
+          var pinShort = pinSha.slice(0, 7);
+          var myTop = g.getBoundingClientRect().top;
+          var pTop = pinEl ? pinEl.getBoundingClientRect().top : 0;
+          var fromSha2 = pTop > myTop ? sha : pinSha;
+          var toSha2   = pTop > myTop ? pinSha : sha;
+          ctxMenu.appendChild(makeMenuItem('Compare with ' + pinShort + '\u2026', function() {
+            window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2, '_blank');
+          }));
+        }
+        ctxMenu.appendChild(makeMenuItem(pinSha && pinSha !== sha ? 'Change first node' : 'Select as first node', function() {
+          clearPinHL();
+          pinSha = sha;
+          setPinHL(g);
+        }));
+        if (pinSha === sha) {
+          ctxMenu.appendChild(makeMenuItem('Clear selection', function() {
+            clearPinHL();
+            pinSha = null;
+          }));
         }
         document.body.appendChild(ctxMenu);
       });
