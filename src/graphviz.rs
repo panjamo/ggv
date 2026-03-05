@@ -155,10 +155,22 @@ function copyHash(el) {
   });
 }
 window.addEventListener('load', function() {
-  // Offset edge count labels away from the edge line
-  document.querySelectorAll('g.edge text').forEach(function(t) {
-    var x = parseFloat(t.getAttribute('x') || 0);
-    t.setAttribute('x', x + 10);
+  // Offset edge count labels away from the edge line; set file-list tooltip
+  document.querySelectorAll('g.edge').forEach(function(g) {
+    var id = g.getAttribute('id') || '';
+    var fileList = id.startsWith('files:') ? id.slice(6).split('|').join('\n') : '';
+    g.querySelectorAll('text').forEach(function(t) {
+      var x = parseFloat(t.getAttribute('x') || 0);
+      t.setAttribute('x', x + 10);
+      if (/^\d+$/.test(t.textContent.trim())) {
+        t.setAttribute('data-ggv-count', '1');
+        if (fileList) {
+          var titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+          titleEl.textContent = fileList;
+          t.appendChild(titleEl);
+        }
+      }
+    });
   });
   // Drag-to-compare: drag one node onto another to open compare view
   var forgeUrl = FORGE_URL_PLACEHOLDER;
@@ -264,7 +276,7 @@ window.addEventListener('load', function() {
       if (!m) return;
       var fromSha = m[1], toSha = m[2];
       g.querySelectorAll('text').forEach(function(t) {
-        if (!/^\d+$/.test(t.textContent.trim())) return;
+        if (!t.getAttribute('data-ggv-count')) return;
         t.style.cursor = 'pointer';
         t.style.fill = '#60a5fa';
         t.addEventListener('click', function(e) {
@@ -366,7 +378,7 @@ window.addEventListener('load', function() {
       if (!m) return;
       var fromSha = m[1], toSha = m[2];
       g.querySelectorAll('text').forEach(function(t) {
-        if (!/^\d+$/.test(t.textContent.trim())) return;
+        if (!t.getAttribute('data-ggv-count')) return;
         t.addEventListener('contextmenu', function(e) {
           e.preventDefault();
           e.stopPropagation();

@@ -9,7 +9,7 @@ use crate::filter::RefFilter;
 use crate::theme::Theme;
 use crate::utils::{repo_name_from_path, time_ago};
 
-type EdgeAttrs = HashMap<(String, String), (Option<String>, Option<String>, usize)>;
+type EdgeAttrs = HashMap<(String, String), (Option<String>, Option<String>, usize, Option<String>)>;
 
 pub struct GitGraphviz {
     repo: Repository,
@@ -352,17 +352,21 @@ impl GitGraphviz {
                 let path_commits = self.collect_path_commits(&commit.id, Some(pid.as_str()), 20);
                 let tooltip = build_tooltip(&path_commits);
                 let count = count_path_commits(&self.repo, &commit.id, Some(pid.as_str()));
-                edge_attrs.insert((pid.clone(), commit.id.clone()), (url, tooltip, count));
+                let files = diff_file_list(&self.repo, pid, &commit.id);
+                edge_attrs.insert(
+                    (pid.clone(), commit.id.clone()),
+                    (url, tooltip, count, files),
+                );
             }
         }
 
         for (child_id, parents) in &commit_parents {
             for parent_id in parents {
-                let (url, tooltip, count) = edge_attrs
+                let (url, tooltip, count, files) = edge_attrs
                     .get(&(parent_id.clone(), child_id.clone()))
-                    .map(|(u, t, c)| (u.as_deref(), t.as_deref(), *c))
-                    .unwrap_or((None, None, 0));
-                let attrs = build_edge_attrs(url, tooltip, count);
+                    .map(|(u, t, c, f)| (u.as_deref(), t.as_deref(), *c, f.as_deref()))
+                    .unwrap_or((None, None, 0, None));
+                let attrs = build_edge_attrs(url, tooltip, count, files);
                 writeln!(writer, "  \"{}\" -> \"{}\"{}", parent_id, child_id, attrs)?;
             }
         }
@@ -805,7 +809,41 @@ fn build_tooltip(path_commits: &[(String, String, String, String)]) -> Option<St
     )
 }
 
-fn build_edge_attrs(url: Option<&str>, tooltip: Option<&str>, count: usize) -> String {
+fn diff_file_list(repo: &Repository, from_sha: &str, to_sha: &str) -> Option<String> {
+    let from_oid = Oid::from_str(from_sha).ok()?;
+    let to_oid = Oid::from_str(to_sha).ok()?;
+    let from_tree = repo.find_commit(from_oid).ok()?.tree().ok()?;
+    let to_tree = repo.find_commit(to_oid).ok()?.tree().ok()?;
+    let diff = repo
+        .diff_tree_to_tree(Some(&from_tree), Some(&to_tree), None)
+        .ok()?;
+    let mut files: Vec<String> = diff
+        .deltas()
+        .filter_map(|d| {
+            d.new_file()
+                .path()
+                .and_then(|p| p.to_str())
+                .map(str::to_string)
+        })
+        .collect();
+    const MAX: usize = 30;
+    let total = files.len();
+    if total == 0 {
+        return None;
+    }
+    if total > MAX {
+        files.truncate(MAX);
+        files.push(format!("... +{} more", total - MAX));
+    }
+    Some(files.join("|"))
+}
+
+fn build_edge_attrs(
+    url: Option<&str>,
+    tooltip: Option<&str>,
+    count: usize,
+    files: Option<&str>,
+) -> String {
     let url_part = url.map_or(String::new(), |u| {
         format!("URL=\"{}\", target=\"_blank\"", u)
     });
@@ -821,7 +859,11 @@ fn build_edge_attrs(url: Option<&str>, tooltip: Option<&str>, count: usize) -> S
     } else {
         String::new()
     };
-    let parts: Vec<&str> = [&url_part, &tooltip_part, &label_part]
+    let id_part = files.map_or(String::new(), |f| {
+        let escaped = f.replace('\\', "\\\\").replace('"', "\\\"");
+        format!("id=\"files:{}\"", escaped)
+    });
+    let parts: Vec<&str> = [&url_part, &tooltip_part, &label_part, &id_part]
         .iter()
         .filter(|s| !s.is_empty())
         .map(|s| s.as_str())
