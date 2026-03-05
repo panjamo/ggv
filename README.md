@@ -18,8 +18,8 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **Drag-to-Compare**: Drag any commit node onto another to open a GitLab or GitHub compare view for that arbitrary range — order is corrected automatically (always `older...newer`)
 - **SHA Copy**: Click any commit node to copy its full 40-character SHA to the clipboard (amber border flash confirms)
 - **Graph Tooltip**: Hover the SVG background to see the repository name, current branch, HEAD commit, author, and date
-- **AI Diff Server**: Start a local web server (`-w`) that opens `git difftool` (default) or produces an AI-generated summary (`-a`) when you click an edge count label; right-clicking the count label always offers an inline AI summary regardless of the `-a` flag
-- **Smart AI Diff**: AI summaries use merge-base detection to produce the correct snapshot diff (`git diff`) enriched with structured commit metadata (`git log`) passed to gia as additional context
+- **AI Diff Server**: Start a local web server (`-w`) that opens `git difftool` when you left-click an edge count label; right-clicking always offers AI diff options (full diff+log, diff-only, log-only)
+- **Smart AI Diff**: AI summaries use merge-base detection to produce the correct snapshot diff (`git diff`) enriched with structured commit metadata (`git log`) passed to gia as additional context; a "diff-only" variant skips the log metadata for a more focused summary
 - **Cross-Platform**: Works on Windows, macOS, and Linux
 
 ## Prerequisites
@@ -81,7 +81,6 @@ Options:
   -c, --current-branch      Show only refs that are ancestors of HEAD
   -w, --web-server          Start the diff web server
   -P, --web-port <PORT>     Port for the diff server (0 = OS-assigned) [default: 0]
-  -a, --use-ai              Use AI (gia) to summarize diffs; without this, opens git difftool
   -b, --gia-browser         Pass -b to gia — gia opens its own browser window
   -p, --gia-prompt <TEXT>   Custom prompt passed to gia (overrides built-in default)
   -h, --help                Print help
@@ -169,16 +168,10 @@ ggv -F v1.0.0 -c
 
 Start the diff server alongside the graph. With `-w`, the SVG is served via the local web server (`http://[::1]:<port>/view`) instead of opened as a file, enabling same-origin requests for the context menu. Clicking the blue edge count label triggers the configured diff action.
 
-**Default (no `--use-ai`)** — opens `git difftool -d sha1 sha2` in your configured diff tool and returns an empty page:
+Left-clicking a count label opens `git difftool -d sha1 sha2` in your configured diff tool. Right-clicking a count label gives AI diff options. AI summaries use merge-base detection; commit metadata (author, date, refs, changed files) is passed to gia as additional context:
 
 ```bash
 ggv -w
-```
-
-**With `--use-ai` (`-a`)** — produces an AI summary via gia and shows it in the browser. The diff is computed relative to the merge-base of the two commits; commit metadata (author, date, refs, changed files) is passed to gia as additional context:
-
-```bash
-ggv -w -a
 ```
 
 Use a fixed port (useful when the SVG will be reopened later):
@@ -190,19 +183,19 @@ ggv -w -P 8080
 Let gia open its own browser window instead of the built-in summary page:
 
 ```bash
-ggv -w -a -b
+ggv -w -b
 ```
 
 Use a custom prompt:
 
 ```bash
-ggv -w -a -p "list the changed files and explain each change in one sentence"
+ggv -w -p "list the changed files and explain each change in one sentence"
 ```
 
 Combined:
 
 ```bash
-ggv -w -a -b -p "summarize in three bullet points"
+ggv -w -b -p "summarize in three bullet points"
 ```
 
 The process stays alive after the SVG is opened, serving requests until Ctrl+C. Each `ggv -w` instance gets its own OS-assigned port, so multiple instances can run simultaneously.
@@ -257,8 +250,8 @@ Open the SVG in a browser to use all interactive features:
 | Hover an edge | Tooltip listing commits condensed into that range |
 | Click an edge | Opens the GitLab / GitHub compare view for that range |
 | Hover the blue edge count label | Tooltip listing the files changed between the two nodes |
-| Click the blue edge count label | Opens `git difftool` (default) or AI summary page (with `-w -a`) |
-| Right-click the blue edge count label | Context menu with "AI Summary of Changes" (requires `-w`) |
+| Click the blue edge count label | Opens `git difftool` (requires `-w`) |
+| Right-click the blue edge count label | Context menu with AI diff options: full diff+log, diff-only, log-only (requires `-w`) |
 | Click a commit node | Copies the full 40-character SHA to the clipboard (amber flash confirms) |
 | Drag one commit node onto another | Opens the forge compare view for that range — always `older...newer` |
 | Ctrl + drag onto another node | Opens the diff web server diff for that range (requires `-w`) |
@@ -271,12 +264,19 @@ When the diff web server is active, right-clicking any commit node opens a conte
 
 | Item | Action |
 |------|--------|
-| Checkout branch | Runs `git checkout <branch>` for the branch at that commit |
+| Select as first node / Change first node | Pin this commit as the "from" end of a manual compare range |
+| Clear selection | Unpin the currently pinned commit |
+| Compare with \<sha\>… | Open diff web server diff for the pinned–current range |
+| Compare with AI – \<sha\>… | AI summary (diff + log metadata) for the pinned–current range |
+| Compare with AI diff – \<sha\>… | AI summary using diff only (no log metadata) |
+| Compare with AI log – \<sha\>… | AI summary using log metadata only |
+| Show Git Log – \<sha\>… | Show formatted `git log` between pinned and current commit |
 | Copy SHA | Copies the full 40-character SHA to the clipboard |
 | Copy branch: \<name\> | Copies the local or remote branch name |
 | Copy tag: \<name\> | Copies the tag name |
 | Delete local: \<name\> | Force-deletes the local branch (`git branch -D`) after confirmation |
 | Delete remote: \<name\> | Pushes a remote branch deletion (`git push <remote> --delete <branch>`) after confirmation |
+| Checkout branch | Runs `git checkout <branch>` for the branch at that commit |
 
 Branch and tag names are read directly from structured metadata embedded in the SVG — no text parsing heuristics.
 
@@ -284,9 +284,10 @@ Branch and tag names are read directly from structured metadata embedded in the 
 
 | Item | Action |
 |------|--------|
-| AI Summary of Changes | Runs an AI diff via gia and shows the summary in a new browser tab |
+| AI Summary of Changes | AI diff+log summary via gia — shown in a new browser tab |
+| AI Summary (diff only) | AI summary using only the diff, no commit log metadata |
 
-Drag-to-compare requires a forge URL (auto-detected or set via `-g`). The blue edge count labels and context menus are only active when `-w` is used. Add `-a` to get an AI summary instead of opening the difftool when left-clicking a count label.
+Drag-to-compare requires a forge URL (auto-detected or set via `-g`). The blue edge count labels and context menus are only active when `-w` is used. Left-clicking a count label always opens `git difftool`.
 
 ## Development
 

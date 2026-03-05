@@ -416,7 +416,6 @@ fn parse_query(query: &str) -> HashMap<String, String> {
     map
 }
 
-
 fn git_log_metadata(
     repo_path: &str,
     base: &str,
@@ -556,7 +555,13 @@ fn resolve_diff_base(repo_path: &str, sha1: &str, sha2: &str) -> Result<String, 
     Ok(mb)
 }
 
-fn run_gia_diff(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>, include_log: bool) -> String {
+fn run_gia_diff(
+    repo_path: &str,
+    sha1: &str,
+    sha2: &str,
+    prompt: Option<&str>,
+    include_log: bool,
+) -> String {
     let base = match resolve_diff_base(repo_path, sha1, sha2) {
         Ok(b) => b,
         Err(e) => return format!("Error resolving diff base: {e}"),
