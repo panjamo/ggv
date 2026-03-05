@@ -385,6 +385,15 @@ window.addEventListener('load', function() {
           ctxMenu.appendChild(makeMenuItem('Compare with ' + pinShort + '\u2026', function() {
             window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2, '_blank');
           }));
+          ctxMenu.appendChild(makeMenuItem('Compare with AI \u2013 ' + pinShort + '\u2026', function() {
+            window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2 + '&ai=1', '_blank');
+          }));
+          ctxMenu.appendChild(makeMenuItem('Compare with AI log \u2013 ' + pinShort + '\u2026', function() {
+            window.open(wsUrl + '/log-summary?from=' + fromSha2 + '&to=' + toSha2, '_blank');
+          }));
+          ctxMenu.appendChild(makeMenuItem('Show Git Log \u2013 ' + pinShort + '\u2026', function() {
+            window.open(wsUrl + '/log?from=' + fromSha2 + '&to=' + toSha2, '_blank');
+          }));
         }
         ctxMenu.appendChild(makeMenuItem(pinSha && pinSha !== sha ? 'Change first node' : 'Select as first node', function() {
           clearPinHL();

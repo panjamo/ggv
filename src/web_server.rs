@@ -32,7 +32,6 @@ pub fn start(
     port: u16,
     repo_path: String,
     svg_path: String,
-    use_ai: bool,
     gia_browser: bool,
     prompt: Option<String>,
 ) -> anyhow::Result<(std::thread::JoinHandle<()>, u16)> {
@@ -44,7 +43,7 @@ pub fn start(
         actual_port
     );
     let handle = std::thread::spawn(move || {
-        run_server(listener, &repo_path, &svg_path, use_ai, gia_browser, prompt)
+        run_server(listener, &repo_path, &svg_path, gia_browser, prompt)
     });
     Ok((handle, actual_port))
 }
@@ -53,7 +52,6 @@ fn run_server(
     listener: TcpListener,
     repo_path: &str,
     svg_path: &str,
-    use_ai: bool,
     gia_browser: bool,
     prompt: Option<String>,
 ) {
@@ -64,14 +62,7 @@ fn run_server(
                 let svg_clone = svg_path.to_string();
                 let prompt_clone = prompt.clone();
                 std::thread::spawn(move || {
-                    handle_connection(
-                        stream,
-                        &repo_clone,
-                        &svg_clone,
-                        use_ai,
-                        gia_browser,
-                        prompt_clone,
-                    )
+                    handle_connection(stream, &repo_clone, &svg_clone, gia_browser, prompt_clone)
                 });
             }
             Err(e) => eprintln!("Connection error: {}", e),
@@ -83,7 +74,6 @@ fn handle_connection(
     mut stream: TcpStream,
     repo_path: &str,
     svg_path: &str,
-    use_ai: bool,
     gia_browser: bool,
     prompt: Option<String>,
 ) {
@@ -179,7 +169,7 @@ fn handle_connection(
                 }
             }
 
-            if !use_ai && !force_ai {
+            if !force_ai {
                 send_response(
                     &mut stream,
                     200,
