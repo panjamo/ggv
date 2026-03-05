@@ -170,7 +170,7 @@ fn handle_connection(
             }
 
             let effective_prompt = prompt.as_deref();
-            if gia_browser && !force_ai {
+            if gia_browser {
                 run_gia_browser(repo_path, &sha1, &sha2, effective_prompt);
                 send_response(
                     &mut stream,
