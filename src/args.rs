@@ -60,8 +60,8 @@ pub struct Args {
     #[arg(
         short = 't',
         long,
-        help = "Color theme: dark or light",
-        default_value_t = Theme::Light,
+        help = "Color theme: dark or light [default: dark]",
+        default_value_t = Theme::Dark,
         value_enum
     )]
     pub theme: Theme,

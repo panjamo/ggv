@@ -8,7 +8,7 @@ A Rust CLI tool that generates visual representations of Git repository structur
 
 - **Comprehensive Visualization**: Displays commits, branches, remote branches, tags, and HEAD
 - **Condensed Graph**: Only referenced commits (branch tips, tags, root, merge junctions) are shown — intermediate commits are skipped for clarity
-- **Dual Theme**: Dark and light theme — branch nodes are color-coded by type (main, develop, feature/\*, release/\*, hotfix/\*); switch with `-t light`
+- **Dual Theme**: Dark and light theme — branch nodes are color-coded by type (main, develop, feature/\*, release/\*, hotfix/\*); dark is the default, switch with `-t light`
 - **Auto Fetch**: Runs `git fetch --tags --prune` before generating the graph to ensure tags are current and stale remote-tracking refs are removed
 - **SVG Output**: Generates high-quality SVG images opened automatically in your default viewer
 - **Ref Filtering**: Choose which ref types to include (local branches, remotes, tags, HEAD)
@@ -76,7 +76,7 @@ Options:
   -F, --from <COMMIT>       Limit graph to this commit and its descendants
   -X, --no-fetch            Skip automatic 'git fetch --tags --prune'
   -k, --keep-dot            Keep the intermediate DOT file after SVG generation
-  -t, --theme <THEME>       Color theme: dark or light [default: light]
+  -t, --theme <THEME>       Color theme: dark or light [default: dark]
   -c, --current-branch      Show only refs that are ancestors of HEAD
   -w, --web-server          Start the diff web server
   -P, --web-port <PORT>     Port for the diff server (0 = OS-assigned) [default: 0]
@@ -146,10 +146,10 @@ ggv -F feature/my-branch
 ggv -F v2.0.0
 ```
 
-Use the dark theme:
+Use the light theme:
 
 ```bash
-ggv -t dark
+ggv -t light
 ```
 
 Show only the current branch:
@@ -166,7 +166,7 @@ ggv -F v1.0.0 -c
 
 ### Diff Web Server
 
-Start the diff server alongside the graph. Clicking the blue edge count label triggers the configured diff action.
+Start the diff server alongside the graph. With `-w`, the SVG is served via the local web server (`http://[::1]:<port>/view`) instead of opened as a file, enabling same-origin requests for the context menu. Clicking the blue edge count label triggers the configured diff action.
 
 **Default (no `--use-ai`)** — opens `git difftool -d sha1 sha2` in your configured diff tool and returns an empty page:
 
@@ -216,7 +216,7 @@ The process stays alive after the SVG is opened, serving requests until Ctrl+C. 
 
 Branch nodes are rounded rectangles, color-coded by name. Two built-in themes are available:
 
-#### Dark theme (`-t dark`) — background `#0F172A`
+#### Dark theme (`-t dark`, default) — background `#0F172A`
 
 | Branch pattern | Fill | Border | Text |
 |----------------|------|--------|------|
@@ -227,7 +227,7 @@ Branch nodes are rounded rectangles, color-coded by name. Two built-in themes ar
 | `hotfix/*` | `#DC2626` | `#F87171` | `#FEF2F2` |
 | other | `#334155` | `#60A5FA` | `#E2E8F0` |
 
-#### Light theme (`-t light`, default) — background `#F8FAFC`
+#### Light theme (`-t light`) — background `#F8FAFC`
 
 | Branch pattern | Fill | Border | Text |
 |----------------|------|--------|------|
@@ -258,9 +258,26 @@ Open the SVG in a browser to use all interactive features:
 | Click the blue edge count label | Opens `git difftool` (default) or AI summary page (with `-w -a`) |
 | Click a commit node | Copies the full 40-character SHA to the clipboard (amber flash confirms) |
 | Drag one commit node onto another | Opens the forge compare view for that range — always `older...newer` |
+| Ctrl + drag onto another node | Opens the diff web server diff for that range (requires `-w`) |
 | Hover the SVG background | Tooltip with repository name, branch, HEAD commit, author, and date |
+| Right-click a commit node | Context menu (requires `-w`) |
 
-Drag-to-compare requires a forge URL (auto-detected or set via `-g`). The blue edge count labels are only active when `-w` is used. Add `-a` to get an AI summary instead of opening the difftool.
+#### Right-click context menu (requires `-w`)
+
+When the diff web server is active, right-clicking any commit node opens a context menu:
+
+| Item | Action |
+|------|--------|
+| Checkout branch | Runs `git checkout <branch>` for the branch at that commit |
+| Copy SHA | Copies the full 40-character SHA to the clipboard |
+| Copy branch: \<name\> | Copies the local or remote branch name |
+| Copy tag: \<name\> | Copies the tag name |
+| Delete local: \<name\> | Force-deletes the local branch (`git branch -D`) after confirmation |
+| Delete remote: \<name\> | Pushes a remote branch deletion (`git push <remote> --delete <branch>`) after confirmation |
+
+Branch and tag names are read directly from structured metadata embedded in the SVG — no text parsing heuristics.
+
+Drag-to-compare requires a forge URL (auto-detected or set via `-g`). The blue edge count labels and context menu are only active when `-w` is used. Add `-a` to get an AI summary instead of opening the difftool.
 
 ## Development
 
