@@ -338,9 +338,36 @@ window.addEventListener('load', function() {
         ctxMenu = document.createElement('div');
         ctxMenu.style.cssText = 'position:fixed;left:' + e.clientX + 'px;top:' + e.clientY + 'px;background:#1a1f2e;border:1px solid #2d3748;border-radius:8px;padding:4px 0;z-index:9999;min-width:180px;box-shadow:0 8px 24px rgba(0,0,0,0.6);font-family:"Segoe UI",sans-serif;';
         ctxMenu.addEventListener('click', function(ev) { ev.stopPropagation(); });
-        ctxMenu.appendChild(makeMenuItem('Checkout branch', function() {
-          fetch(wsUrl + '/checkout?sha=' + sha);
+        ctxMenu.appendChild(makeMenuItem(pinSha && pinSha !== sha ? 'Change first node' : 'Select as first node', function() {
+          clearPinHL();
+          pinSha = sha;
+          setPinHL(g);
         }));
+        if (pinSha === sha) {
+          ctxMenu.appendChild(makeMenuItem('Clear selection', function() {
+            clearPinHL();
+            pinSha = null;
+          }));
+        }
+        if (pinSha && pinSha !== sha) {
+          var pinShort = pinSha.slice(0, 7);
+          var myTop = g.getBoundingClientRect().top;
+          var pTop = pinEl ? pinEl.getBoundingClientRect().top : 0;
+          var fromSha2 = pTop > myTop ? pinSha : sha;
+          var toSha2   = pTop > myTop ? sha : pinSha;
+          ctxMenu.appendChild(makeMenuItem('Compare with ' + pinShort + '\u2026', function() {
+            window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2, '_blank');
+          }));
+          ctxMenu.appendChild(makeMenuItem('Compare with AI \u2013 ' + pinShort + '\u2026', function() {
+            window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2 + '&ai=1', '_blank');
+          }));
+          ctxMenu.appendChild(makeMenuItem('Compare with AI log \u2013 ' + pinShort + '\u2026', function() {
+            window.open(wsUrl + '/log-summary?from=' + fromSha2 + '&to=' + toSha2, '_blank');
+          }));
+          ctxMenu.appendChild(makeMenuItem('Show Git Log \u2013 ' + pinShort + '\u2026', function() {
+            window.open(wsUrl + '/log?from=' + fromSha2 + '&to=' + toSha2, '_blank');
+          }));
+        }
         ctxMenu.appendChild(makeDivider());
         ctxMenu.appendChild(makeMenuItem('Copy SHA', function() {
           navigator.clipboard.writeText(sha);
@@ -376,36 +403,9 @@ window.addEventListener('load', function() {
           });
         }
         ctxMenu.appendChild(makeDivider());
-        if (pinSha && pinSha !== sha) {
-          var pinShort = pinSha.slice(0, 7);
-          var myTop = g.getBoundingClientRect().top;
-          var pTop = pinEl ? pinEl.getBoundingClientRect().top : 0;
-          var fromSha2 = pTop > myTop ? pinSha : sha;
-          var toSha2   = pTop > myTop ? sha : pinSha;
-          ctxMenu.appendChild(makeMenuItem('Compare with ' + pinShort + '\u2026', function() {
-            window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2, '_blank');
-          }));
-          ctxMenu.appendChild(makeMenuItem('Compare with AI \u2013 ' + pinShort + '\u2026', function() {
-            window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2 + '&ai=1', '_blank');
-          }));
-          ctxMenu.appendChild(makeMenuItem('Compare with AI log \u2013 ' + pinShort + '\u2026', function() {
-            window.open(wsUrl + '/log-summary?from=' + fromSha2 + '&to=' + toSha2, '_blank');
-          }));
-          ctxMenu.appendChild(makeMenuItem('Show Git Log \u2013 ' + pinShort + '\u2026', function() {
-            window.open(wsUrl + '/log?from=' + fromSha2 + '&to=' + toSha2, '_blank');
-          }));
-        }
-        ctxMenu.appendChild(makeMenuItem(pinSha && pinSha !== sha ? 'Change first node' : 'Select as first node', function() {
-          clearPinHL();
-          pinSha = sha;
-          setPinHL(g);
+        ctxMenu.appendChild(makeMenuItem('Checkout branch', function() {
+          fetch(wsUrl + '/checkout?sha=' + sha);
         }));
-        if (pinSha === sha) {
-          ctxMenu.appendChild(makeMenuItem('Clear selection', function() {
-            clearPinHL();
-            pinSha = null;
-          }));
-        }
         document.body.appendChild(ctxMenu);
       });
     });
