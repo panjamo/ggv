@@ -117,8 +117,9 @@ fn handle_connection(
         }
     };
 
+    run_git_difftool(repo_path, &sha1, &sha2);
+
     if !use_ai {
-        run_git_difftool(repo_path, &sha1, &sha2);
         send_response(
             &mut stream,
             200,

@@ -93,7 +93,7 @@ pub struct Args {
     #[arg(
         short = 'a',
         long,
-        help = "Use AI (gia) to summarize the diff; if omitted, opens git difftool instead",
+        help = "Additionally run AI (gia) to summarize the diff; difftool always runs",
         action = clap::ArgAction::SetTrue
     )]
     pub use_ai: bool,
