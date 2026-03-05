@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 use crate::theme::Theme;
 
@@ -173,7 +173,7 @@ impl CommitNode {
 
         if !self.refs.is_empty() {
             let mut local_branches = BTreeSet::new();
-            let mut remote_branches: HashMap<String, String> = HashMap::new();
+            let mut remote_branches: BTreeSet<(String, String)> = BTreeSet::new();
             let mut other_refs = Vec::new();
 
             for r in &self.refs {
@@ -190,7 +190,7 @@ impl CommitNode {
                         if primary_branch.is_none() {
                             primary_branch = Some(branch.to_string());
                         }
-                        remote_branches.insert(branch.to_string(), remote.to_string());
+                        remote_branches.insert((remote.to_string(), branch.to_string()));
                     }
                     has_remote_branch = true;
                 } else {
@@ -204,7 +204,7 @@ impl CommitNode {
             for lb in &local_branches {
                 ref_parts.push(lb.clone());
             }
-            for (branch, remote) in &remote_branches {
+            for (remote, branch) in &remote_branches {
                 ref_parts.push(format!("{}/{}", remote, branch));
             }
             ref_parts.extend(other_refs);
