@@ -289,11 +289,36 @@ fn is_valid_sha(s: &str) -> bool {
     s.len() >= 7 && s.len() <= 40 && s.chars().all(|c| c.is_ascii_hexdigit())
 }
 
+fn percent_decode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(h), Some(l)) = (
+                (bytes[i + 1] as char).to_digit(16),
+                (bytes[i + 2] as char).to_digit(16),
+            ) {
+                out.push((h * 16 + l) as u8 as char);
+                i += 3;
+                continue;
+            }
+        }
+        if bytes[i] == b'+' {
+            out.push(' ');
+        } else {
+            out.push(bytes[i] as char);
+        }
+        i += 1;
+    }
+    out
+}
+
 fn parse_query(query: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for pair in query.split('&') {
         if let Some((k, v)) = pair.split_once('=') {
-            map.insert(k.to_string(), v.to_string());
+            map.insert(k.to_string(), percent_decode(v));
         }
     }
     map
@@ -318,9 +343,8 @@ fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>
     };
 
     let effective_prompt = prompt.unwrap_or(DEFAULT_BROWSER_PROMPT);
-
     let mut gia = match std::process::Command::new("gia")
-        .args(["-b", "-c", effective_prompt])
+        .args(["-b", effective_prompt])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -340,40 +364,54 @@ fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>
     let _ = gia.wait();
 }
 
-fn resolve_diff_base(repo_path: &str, sha1: &str, sha2: &str) -> String {
+fn resolve_diff_base(repo_path: &str, sha1: &str, sha2: &str) -> Result<String, String> {
     // Check if sha1 is a direct ancestor of sha2
-    let is_ancestor = std::process::Command::new("git")
+    let ancestor_status = std::process::Command::new("git")
         .args(["-C", repo_path, "merge-base", "--is-ancestor", sha1, sha2])
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if is_ancestor {
-        return sha1.to_string();
+        .map_err(|e| format!("git merge-base --is-ancestor failed to start: {e}"))?;
+    if ancestor_status.success() {
+        return Ok(sha1.to_string());
     }
+
     // Fall back to merge-base
-    if let Ok(out) = std::process::Command::new("git")
+    let out = std::process::Command::new("git")
         .args(["-C", repo_path, "merge-base", sha1, sha2])
         .output()
-    {
-        let mb = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !mb.is_empty() {
-            return mb;
-        }
+        .map_err(|e| format!("git merge-base failed to start: {e}"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(format!(
+            "git merge-base exited with {}: {}",
+            out.status, stderr
+        ));
     }
-    sha1.to_string()
+    let mb = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if mb.is_empty() {
+        return Err("git merge-base returned empty output".to_string());
+    }
+    Ok(mb)
 }
 
 fn run_gia_diff(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) -> String {
-    let base = resolve_diff_base(repo_path, sha1, sha2);
+    let base = match resolve_diff_base(repo_path, sha1, sha2) {
+        Ok(b) => b,
+        Err(e) => return format!("Error resolving diff base: {e}"),
+    };
 
     // Snapshot diff: diff(base, sha2)
-    let diff = match std::process::Command::new("git")
+    let diff_out = match std::process::Command::new("git")
         .args(["-C", repo_path, "diff", &base, sha2])
         .output()
     {
-        Ok(out) => out.stdout,
+        Ok(out) => out,
         Err(e) => return format!("Error running git diff: {e}"),
     };
+    if !diff_out.status.success() {
+        let stderr = String::from_utf8_lossy(&diff_out.stderr).trim().to_string();
+        return format!("git diff exited with {}: {}", diff_out.status, stderr);
+    }
+    let diff = diff_out.stdout;
 
     if diff.is_empty() {
         return "No differences found between these commits.".to_string();
@@ -381,7 +419,7 @@ fn run_gia_diff(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) -
 
     // Commit metadata: log(base..sha2) with branch/tag decorations
     let log_range = format!("{}..{}", base, sha2);
-    let metadata = std::process::Command::new("git")
+    let log_out = match std::process::Command::new("git")
         .args([
             "-C",
             repo_path,
@@ -391,15 +429,21 @@ fn run_gia_diff(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) -
             &log_range,
         ])
         .output()
-        .map(|o| o.stdout)
-        .unwrap_or_default();
+    {
+        Ok(out) => out,
+        Err(e) => return format!("Error running git log: {e}"),
+    };
+    if !log_out.status.success() {
+        let stderr = String::from_utf8_lossy(&log_out.stderr).trim().to_string();
+        return format!("git log exited with {}: {}", log_out.status, stderr);
+    }
+    let metadata = log_out.stdout;
 
     // Write metadata to a temp file for gia -f
     let meta_path = std::env::temp_dir().join("ggv_meta.txt");
     let has_meta = !metadata.is_empty() && std::fs::write(&meta_path, &metadata).is_ok();
 
     let effective_prompt = prompt.unwrap_or(DEFAULT_DIFF_PROMPT);
-
     let mut gia_args: Vec<&str> = vec![effective_prompt];
     let meta_path_str;
     if has_meta {
