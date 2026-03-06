@@ -93,6 +93,16 @@ fn with_lang(prompt: &str, lang: &str) -> String {
     format!("{}\nRespond in the language of locale: {}.", prompt, lang)
 }
 
+/// Appends a voice-input instruction to a prompt string when audio mode is active.
+fn with_audio(prompt: &str) -> String {
+    format!(
+        "{}\nAlso pay special attention to the voice input. \
+It may contain filter instructions or directions — \
+for example, specifying what should or should not be considered in the analysis.",
+        prompt
+    )
+}
+
 /// Binds to the given port (0 = OS-assigned) and spawns the server thread.
 /// Returns the join handle and the actual bound port.
 pub fn start(
@@ -102,6 +112,7 @@ pub fn start(
     gia_browser: bool,
     prompt: Option<String>,
     lang: String,
+    gia_audio: bool,
     mut regen: Option<RegenerateConfig>,
 ) -> anyhow::Result<(std::thread::JoinHandle<()>, u16)> {
     let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
@@ -123,6 +134,7 @@ pub fn start(
             gia_browser,
             prompt,
             &lang,
+            gia_audio,
             regen,
         )
     });
@@ -136,6 +148,7 @@ fn run_server(
     gia_browser: bool,
     prompt: Option<String>,
     lang: &str,
+    gia_audio: bool,
     regen: Option<Arc<RegenerateConfig>>,
 ) {
     for stream in listener.incoming() {
@@ -154,6 +167,7 @@ fn run_server(
                         gia_browser,
                         prompt_clone,
                         &lang_clone,
+                        gia_audio,
                         regen_clone,
                     )
                 });
@@ -170,6 +184,7 @@ fn handle_connection(
     gia_browser: bool,
     prompt: Option<String>,
     lang: &str,
+    gia_audio: bool,
     regen: Option<Arc<RegenerateConfig>>,
 ) {
     let reader = BufReader::new(match stream.try_clone() {
@@ -296,8 +311,9 @@ fn handle_connection(
             }
             let base_prompt = prompt.as_deref().unwrap_or(DEFAULT_DIFF_PROMPT).to_string();
             let effective_prompt = with_lang(&base_prompt, lang);
+            let effective_prompt = if gia_audio { with_audio(&effective_prompt) } else { effective_prompt };
             if gia_browser {
-                run_gia_browser(repo_path, &sha1, &sha2, Some(&effective_prompt));
+                run_gia_browser(repo_path, &sha1, &sha2, Some(&effective_prompt), gia_audio);
                 send_response(
                     &mut stream,
                     200,
@@ -311,6 +327,7 @@ fn handle_connection(
                     &sha2,
                     Some(&effective_prompt),
                     include_log,
+                    gia_audio,
                 );
                 let html = build_html(
                     &sha1[..sha1.len().min(7)],
@@ -347,8 +364,9 @@ fn handle_connection(
             }
             let base_prompt = prompt.as_deref().unwrap_or(DEFAULT_LOG_PROMPT).to_string();
             let effective_prompt = with_lang(&base_prompt, lang);
+            let effective_prompt = if gia_audio { with_audio(&effective_prompt) } else { effective_prompt };
             if gia_browser {
-                run_gia_log_browser(repo_path, &sha1, &sha2, Some(&effective_prompt));
+                run_gia_log_browser(repo_path, &sha1, &sha2, Some(&effective_prompt), gia_audio);
                 send_response(
                     &mut stream,
                     200,
@@ -356,7 +374,7 @@ fn handle_connection(
                     HTML_CLOSE_WINDOW,
                 );
             } else {
-                let summary = run_gia_log(repo_path, &sha1, &sha2, Some(&effective_prompt));
+                let summary = run_gia_log(repo_path, &sha1, &sha2, Some(&effective_prompt), gia_audio);
                 let html = build_html(
                     &sha1[..sha1.len().min(7)],
                     &sha2[..sha2.len().min(7)],
@@ -639,7 +657,7 @@ fn run_git_difftool(repo_path: &str, sha1: &str, sha2: &str) {
         .spawn();
 }
 
-fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) {
+fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>, gia_audio: bool) {
     let base = match resolve_diff_base(repo_path, sha1, sha2) {
         Ok(b) => b,
         Err(e) => {
@@ -672,6 +690,9 @@ fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>
 
     let effective_prompt = prompt.unwrap_or(DEFAULT_BROWSER_PROMPT);
     let mut gia_args: Vec<String> = vec!["-b".to_string(), effective_prompt.to_string()];
+    if gia_audio {
+        gia_args.push("-a".to_string());
+    }
     if let Some(ref hp) = header_path {
         gia_args.push("-f".to_string());
         gia_args.push(hp.to_string_lossy().into_owned());
@@ -744,6 +765,7 @@ fn run_gia_diff(
     sha2: &str,
     prompt: Option<&str>,
     include_log: bool,
+    gia_audio: bool,
 ) -> String {
     let base = match resolve_diff_base(repo_path, sha1, sha2) {
         Ok(b) => b,
@@ -790,6 +812,9 @@ fn run_gia_diff(
 
     let effective_prompt = prompt.unwrap_or(DEFAULT_DIFF_PROMPT);
     let mut gia_args: Vec<String> = vec![effective_prompt.to_string()];
+    if gia_audio {
+        gia_args.push("-a".to_string());
+    }
     if let Some(ref hp) = header_path {
         gia_args.push("-f".to_string());
         gia_args.push(hp.to_string_lossy().into_owned());
@@ -836,7 +861,7 @@ fn run_gia_diff(
     result
 }
 
-fn run_gia_log(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) -> String {
+fn run_gia_log(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>, gia_audio: bool) -> String {
     let base = match resolve_diff_base(repo_path, sha1, sha2) {
         Ok(b) => b,
         Err(e) => return format!("Error resolving log base: {e}"),
@@ -860,6 +885,9 @@ fn run_gia_log(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) ->
 
     let effective_prompt = prompt.unwrap_or(DEFAULT_LOG_PROMPT);
     let mut gia_args: Vec<String> = vec![effective_prompt.to_string()];
+    if gia_audio {
+        gia_args.push("-a".to_string());
+    }
     if let Some(ref hp) = header_path {
         gia_args.push("-f".to_string());
         gia_args.push(hp.to_string_lossy().into_owned());
@@ -898,7 +926,7 @@ fn run_gia_log(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) ->
     result
 }
 
-fn run_gia_log_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) {
+fn run_gia_log_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>, gia_audio: bool) {
     let base = match resolve_diff_base(repo_path, sha1, sha2) {
         Ok(b) => b,
         Err(e) => {
@@ -921,6 +949,9 @@ fn run_gia_log_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&
 
     let effective_prompt = prompt.unwrap_or(DEFAULT_LOG_PROMPT);
     let mut gia_args: Vec<String> = vec!["-b".to_string(), effective_prompt.to_string()];
+    if gia_audio {
+        gia_args.push("-a".to_string());
+    }
     if let Some(ref hp) = header_path {
         gia_args.push("-f".to_string());
         gia_args.push(hp.to_string_lossy().into_owned());

@@ -81,6 +81,7 @@ fn main() -> Result<()> {
             args.gia_browser,
             args.gia_prompt,
             args.lang,
+            args.gia_audio,
             Some(regen),
         )
         .context("Failed to start diff web server")?;

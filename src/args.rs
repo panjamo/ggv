@@ -112,4 +112,12 @@ pub struct Args {
         default_value = "de-DE"
     )]
     pub lang: String,
+
+    #[arg(
+        short = 'A',
+        long,
+        help = "Activate microphone audio recording in gia; voice input is used as filter/direction for the AI analysis",
+        action = clap::ArgAction::SetTrue
+    )]
+    pub gia_audio: bool,
 }
