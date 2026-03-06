@@ -21,7 +21,8 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **AI Diff Server**: Start a local web server (`-w`) that opens `git difftool` when you left-click an edge count label; right-clicking always offers AI diff options (full diff+log, diff-only, log-only)
 - **Smart AI Diff**: AI summaries use merge-base detection to produce the correct snapshot diff (`git diff`) enriched with structured commit metadata (`git log`) passed to gia as additional context; a "diff-only" variant skips the log metadata for a more focused summary
 - **Multilingual AI Output**: AI summaries are delivered in a configurable language (`-l`/`--lang`, e.g. `de-DE`, `en-US`, `fr-FR`); German is the default
-- **Audio Input**: `-A` activates microphone recording in gia (`-a`); the voice input is treated as a filter or direction — e.g. "ignore test files" or "focus only on the API changes" — and is appended to the AI prompt
+- **Browser Mode**: AI diff results open in gia's own browser window by default; pass `-b` to disable and receive text output instead
+- **Audio Input**: Microphone recording in gia is active by default; the voice input is treated as a filter or direction — e.g. "ignore test files" or "focus only on the API changes" — and is appended to the AI prompt; pass `-N` to disable
 - **Cross-Platform**: Works on Windows, macOS, and Linux
 
 ## Prerequisites
@@ -83,10 +84,10 @@ Options:
   -c, --current-branch      Show only refs that are ancestors of HEAD
   -w, --web-server          Start the diff web server
   -P, --web-port <PORT>     Port for the diff server (0 = OS-assigned) [default: 0]
-  -b, --gia-browser         Pass -b to gia — gia opens its own browser window
+  -b, --gia-browser         Deactivate gia browser mode; returns text instead of opening its own browser window
   -p, --gia-prompt <TEXT>   Custom prompt passed to gia (overrides built-in default)
   -l, --lang <LOCALE>       Language locale for AI output (e.g. de-DE, en-US, fr-FR) [default: de-DE]
-  -A, --gia-audio           Activate microphone audio recording in gia; voice input is used as filter/direction for the AI analysis
+  -N, --no-gia-audio        Deactivate microphone audio recording in gia
   -h, --help                Print help
   -V, --version             Print version
 ```
@@ -184,7 +185,7 @@ Use a fixed port (useful when the SVG will be reopened later):
 ggv -w -P 8080
 ```
 
-Let gia open its own browser window instead of the built-in summary page:
+Disable gia browser mode — get text output in the built-in summary page instead:
 
 ```bash
 ggv -w -b
@@ -203,10 +204,10 @@ ggv -w --lang en-US
 ggv -w --lang fr-FR
 ```
 
-Activate audio input — gia records from the microphone; speak filter instructions or directions before the AI processes the diff:
+Deactivate audio input — gia will not record from the microphone:
 
 ```bash
-ggv -w -A
+ggv -w -N
 ```
 
 Combined:
@@ -214,7 +215,7 @@ Combined:
 ```bash
 ggv -w -b -p "summarize in three bullet points"
 ggv -w -b --lang en-US
-ggv -w -A --lang en-US
+ggv -w -N --lang en-US
 ```
 
 The process stays alive after the SVG is opened, serving requests until Ctrl+C. Each `ggv -w` instance gets its own OS-assigned port, so multiple instances can run simultaneously.

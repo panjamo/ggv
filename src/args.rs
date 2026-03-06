@@ -93,8 +93,9 @@ pub struct Args {
     #[arg(
         short = 'b',
         long,
-        help = "Pass -b to gia so it opens its own browser window instead of returning text",
-        action = clap::ArgAction::SetTrue
+        help = "Deactivate gia browser mode; returns text instead of opening its own browser window",
+        action = clap::ArgAction::SetFalse,
+        default_value_t = true
     )]
     pub gia_browser: bool,
 
@@ -114,10 +115,11 @@ pub struct Args {
     pub lang: String,
 
     #[arg(
-        short = 'A',
+        short = 'N',
         long,
-        help = "Activate microphone audio recording in gia; voice input is used as filter/direction for the AI analysis",
-        action = clap::ArgAction::SetTrue
+        help = "Deactivate microphone audio recording in gia",
+        action = clap::ArgAction::SetFalse,
+        default_value_t = true
     )]
     pub gia_audio: bool,
 }
