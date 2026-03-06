@@ -21,6 +21,7 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **AI Diff Server**: Start a local web server (`-w`) that opens `git difftool` when you left-click an edge count label; right-clicking always offers AI diff options (full diff+log, diff-only, log-only)
 - **Smart AI Diff**: AI summaries use merge-base detection to produce the correct snapshot diff (`git diff`) enriched with structured commit metadata (`git log`) passed to gia as additional context; a "diff-only" variant skips the log metadata for a more focused summary
 - **Multilingual AI Output**: AI summaries are delivered in a configurable language (`-l`/`--lang`, e.g. `de-DE`, `en-US`, `fr-FR`); German is the default
+- **Audio Input**: `-A` activates microphone recording in gia (`-a`); the voice input is treated as a filter or direction — e.g. "ignore test files" or "focus only on the API changes" — and is appended to the AI prompt
 - **Cross-Platform**: Works on Windows, macOS, and Linux
 
 ## Prerequisites
@@ -85,6 +86,7 @@ Options:
   -b, --gia-browser         Pass -b to gia — gia opens its own browser window
   -p, --gia-prompt <TEXT>   Custom prompt passed to gia (overrides built-in default)
   -l, --lang <LOCALE>       Language locale for AI output (e.g. de-DE, en-US, fr-FR) [default: de-DE]
+  -A, --gia-audio           Activate microphone audio recording in gia; voice input is used as filter/direction for the AI analysis
   -h, --help                Print help
   -V, --version             Print version
 ```
@@ -201,11 +203,18 @@ ggv -w --lang en-US
 ggv -w --lang fr-FR
 ```
 
+Activate audio input — gia records from the microphone; speak filter instructions or directions before the AI processes the diff:
+
+```bash
+ggv -w -A
+```
+
 Combined:
 
 ```bash
 ggv -w -b -p "summarize in three bullet points"
 ggv -w -b --lang en-US
+ggv -w -A --lang en-US
 ```
 
 The process stays alive after the SVG is opened, serving requests until Ctrl+C. Each `ggv -w` instance gets its own OS-assigned port, so multiple instances can run simultaneously.
