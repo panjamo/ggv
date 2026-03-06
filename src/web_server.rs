@@ -96,7 +96,7 @@ fn with_lang(prompt: &str, lang: &str) -> String {
 /// Appends a voice-input instruction to a prompt string when audio mode is active.
 fn with_audio(prompt: &str) -> String {
     format!(
-        "{}\nAlso pay special attention to the voice input. \
+        "{}\nThe audio/ogg.attachment is an extension for the prompt \
 It may contain filter instructions or directions — \
 for example, specifying what should or should not be considered in the analysis.",
         prompt
