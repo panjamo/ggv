@@ -2,6 +2,68 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write as IoWrite};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::process::Stdio;
+use std::sync::Arc;
+
+use crate::filter::RefFilter;
+use crate::graph::GitGraphviz;
+use crate::graphviz::generate_svg;
+use crate::theme::Theme;
+
+/// All parameters needed to regenerate the DOT+SVG after a git operation.
+pub struct RegenerateConfig {
+    pub repo_path: String,
+    pub dot_path: String,
+    pub filter: String,
+    pub gitlab_url: Option<String>,
+    pub from_commit: Option<String>,
+    pub theme: Theme,
+    pub current_branch_only: bool,
+    pub no_fetch: bool,
+    pub keep_dot: bool,
+    /// Filled in by `start()` once the port is known.
+    pub web_server_url: String,
+}
+
+fn regenerate(config: &RegenerateConfig) {
+    if !config.no_fetch {
+        let _ = std::process::Command::new("git")
+            .args(["-C", &config.repo_path, "fetch", "--tags", "--prune"])
+            .status();
+    }
+    let filter = RefFilter::from_string(&config.filter);
+    let git_viz = match GitGraphviz::new(
+        &config.repo_path,
+        filter,
+        config.gitlab_url.clone(),
+        config.from_commit.clone(),
+        config.theme,
+        config.current_branch_only,
+    ) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Regenerate: failed to open repo: {e}");
+            return;
+        }
+    };
+    if let Err(e) = git_viz.generate_dot(&config.dot_path) {
+        eprintln!("Regenerate: failed to generate DOT: {e}");
+        return;
+    }
+    let ws_url = if config.web_server_url.is_empty() {
+        None
+    } else {
+        Some(config.web_server_url.as_str())
+    };
+    match generate_svg(&config.dot_path, git_viz.forge_url(), ws_url) {
+        Ok(_) => {
+            if !config.keep_dot {
+                let _ = std::fs::remove_file(&config.dot_path);
+            }
+            eprintln!("SVG regenerated.");
+        }
+        Err(e) => eprintln!("Regenerate: SVG generation failed: {e}"),
+    }
+}
 
 const DEFAULT_BROWSER_PROMPT: &str = "Summarize the changes.
         At the beginning, I would like a paragraph that is two sentences long, where everything is summarized very briefly.
@@ -40,6 +102,7 @@ pub fn start(
     gia_browser: bool,
     prompt: Option<String>,
     lang: String,
+    mut regen: Option<RegenerateConfig>,
 ) -> anyhow::Result<(std::thread::JoinHandle<()>, u16)> {
     let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
     let listener = TcpListener::bind(addr)?;
@@ -48,8 +111,20 @@ pub fn start(
         "Diff server listening on http://[::1]:{} (Ctrl+C to stop)",
         actual_port
     );
+    if let Some(ref mut cfg) = regen {
+        cfg.web_server_url = base_url(actual_port);
+    }
+    let regen = regen.map(Arc::new);
     let handle = std::thread::spawn(move || {
-        run_server(listener, &repo_path, &svg_path, gia_browser, prompt, &lang)
+        run_server(
+            listener,
+            &repo_path,
+            &svg_path,
+            gia_browser,
+            prompt,
+            &lang,
+            regen,
+        )
     });
     Ok((handle, actual_port))
 }
@@ -61,6 +136,7 @@ fn run_server(
     gia_browser: bool,
     prompt: Option<String>,
     lang: &str,
+    regen: Option<Arc<RegenerateConfig>>,
 ) {
     for stream in listener.incoming() {
         match stream {
@@ -69,6 +145,7 @@ fn run_server(
                 let svg_clone = svg_path.to_string();
                 let prompt_clone = prompt.clone();
                 let lang_clone = lang.to_string();
+                let regen_clone = regen.clone();
                 std::thread::spawn(move || {
                     handle_connection(
                         stream,
@@ -77,6 +154,7 @@ fn run_server(
                         gia_browser,
                         prompt_clone,
                         &lang_clone,
+                        regen_clone,
                     )
                 });
             }
@@ -92,6 +170,7 @@ fn handle_connection(
     gia_browser: bool,
     prompt: Option<String>,
     lang: &str,
+    regen: Option<Arc<RegenerateConfig>>,
 ) {
     let reader = BufReader::new(match stream.try_clone() {
         Ok(s) => s,
@@ -117,6 +196,10 @@ fn handle_connection(
         "/view" => {
             serve_svg(&mut stream, svg_path);
         }
+        "/version" => {
+            let version = svg_mtime(svg_path);
+            send_response(&mut stream, 200, "text/plain", &version);
+        }
         "/checkout" => {
             let params = parse_query(query);
             let sha = match params.get("sha") {
@@ -128,6 +211,9 @@ fn handle_connection(
             };
             run_git_checkout(repo_path, &sha);
             send_response(&mut stream, 200, "text/plain", "OK");
+            if let Some(cfg) = regen {
+                std::thread::spawn(move || regenerate(&cfg));
+            }
         }
         "/delete-branch" => {
             let params = parse_query(query);
@@ -141,6 +227,9 @@ fn handle_connection(
             let scope = params.get("scope").map(|s| s.as_str()).unwrap_or("local");
             run_branch_delete(repo_path, &name, scope);
             send_response(&mut stream, 200, "text/plain", "OK");
+            if let Some(cfg) = regen {
+                std::thread::spawn(move || regenerate(&cfg));
+            }
         }
         "/diff" => {
             let params = parse_query(query);
@@ -310,6 +399,18 @@ fn handle_connection(
     }
 }
 
+fn svg_mtime(svg_path: &str) -> String {
+    std::fs::metadata(svg_path)
+        .and_then(|m| m.modified())
+        .map(|t| {
+            t.duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+                .to_string()
+        })
+        .unwrap_or_else(|_| "0".to_string())
+}
+
 fn serve_svg(stream: &mut TcpStream, svg_path: &str) {
     let svg_content = match std::fs::read_to_string(svg_path) {
         Ok(c) => c,
@@ -334,6 +435,19 @@ fn serve_svg(stream: &mut TcpStream, svg_path: &str) {
   body {{ margin: 0; background: #1a1f2e; overflow: auto; }}
   svg {{ display: block; }}
 </style>
+<script>
+(function() {{
+  var v = null;
+  function poll() {{
+    fetch('/version').then(function(r) {{ return r.text(); }}).then(function(nv) {{
+      if (v === null) {{ v = nv; }}
+      else if (nv !== v) {{ location.reload(); }}
+    }}).catch(function() {{}});
+  }}
+  setInterval(poll, 1500);
+  poll();
+}})();
+</script>
 </head>
 <body>{}</body>
 </html>"#,

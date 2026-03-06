@@ -62,6 +62,18 @@ fn main() -> Result<()> {
         .to_string();
 
     let (server_handle, web_server_url) = if args.web_server {
+        let regen = web_server::RegenerateConfig {
+            repo_path: args.repo_path.clone(),
+            dot_path: output.clone(),
+            filter: args.filter.clone(),
+            gitlab_url: args.gitlab_url.clone(),
+            from_commit: args.from.clone(),
+            theme: args.theme,
+            current_branch_only: args.current_branch,
+            no_fetch: args.no_fetch,
+            keep_dot: args.keep_dot,
+            web_server_url: String::new(), // filled in by start()
+        };
         let (handle, port) = web_server::start(
             args.web_port,
             args.repo_path.clone(),
@@ -69,6 +81,7 @@ fn main() -> Result<()> {
             args.gia_browser,
             args.gia_prompt,
             args.lang,
+            Some(regen),
         )
         .context("Failed to start diff web server")?;
         (Some(handle), Some(web_server::base_url(port)))
