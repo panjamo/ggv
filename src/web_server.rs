@@ -575,6 +575,40 @@ fn git_log_metadata(
         .output()
 }
 
+/// Resolves the best human-readable label for a commit SHA.
+/// Prefers branch/tag decorations from `git log -1 --pretty=format:%D`.
+fn get_ref_label(repo_path: &str, sha: &str) -> String {
+    let short = &sha[..sha.len().min(7)];
+    if let Ok(out) = std::process::Command::new("git")
+        .args(["-C", repo_path, "log", "-1", "--pretty=format:%D", sha])
+        .output()
+    {
+        let deco = String::from_utf8_lossy(&out.stdout);
+        let deco = deco.trim();
+        if !deco.is_empty() {
+            for part in deco.split(',').map(str::trim) {
+                if let Some(branch) = part.strip_prefix("HEAD -> ") {
+                    return format!("{branch} ({short})");
+                }
+                if !part.starts_with("HEAD") && !part.is_empty() {
+                    return format!("{part} ({short})");
+                }
+            }
+        }
+    }
+    short.to_string()
+}
+
+/// Writes a temp file instructing the AI to use a specific heading.
+/// Returns the file path on success.
+fn write_header_file(label1: &str, label2: &str) -> Option<std::path::PathBuf> {
+    let path = std::env::temp_dir().join("ggv_header.txt");
+    let content =
+        format!("Use the following as the heading/title of your response: \"{label1} → {label2}\"");
+    std::fs::write(&path, content.as_bytes()).ok()?;
+    Some(path)
+}
+
 fn has_git_diff(repo_path: &str, sha1: &str, sha2: &str) -> bool {
     std::process::Command::new("git")
         .args(["-C", repo_path, "diff", "--quiet", sha1, sha2])
@@ -632,8 +666,16 @@ fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>
     let meta_path = std::env::temp_dir().join("ggv_meta_browser.txt");
     let has_meta = !metadata.is_empty() && std::fs::write(&meta_path, &metadata).is_ok();
 
+    let label1 = get_ref_label(repo_path, sha1);
+    let label2 = get_ref_label(repo_path, sha2);
+    let header_path = write_header_file(&label1, &label2);
+
     let effective_prompt = prompt.unwrap_or(DEFAULT_BROWSER_PROMPT);
     let mut gia_args: Vec<String> = vec!["-b".to_string(), effective_prompt.to_string()];
+    if let Some(ref hp) = header_path {
+        gia_args.push("-f".to_string());
+        gia_args.push(hp.to_string_lossy().into_owned());
+    }
     if has_meta {
         gia_args.push("-f".to_string());
         gia_args.push(meta_path.to_string_lossy().into_owned());
@@ -659,6 +701,9 @@ fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>
     // fire-and-forget: gia opens its own window
     let _ = gia.wait();
 
+    if let Some(ref hp) = header_path {
+        let _ = std::fs::remove_file(hp);
+    }
     if has_meta {
         let _ = std::fs::remove_file(&meta_path);
     }
@@ -739,8 +784,16 @@ fn run_gia_diff(
         false
     };
 
+    let label1 = get_ref_label(repo_path, sha1);
+    let label2 = get_ref_label(repo_path, sha2);
+    let header_path = write_header_file(&label1, &label2);
+
     let effective_prompt = prompt.unwrap_or(DEFAULT_DIFF_PROMPT);
     let mut gia_args: Vec<String> = vec![effective_prompt.to_string()];
+    if let Some(ref hp) = header_path {
+        gia_args.push("-f".to_string());
+        gia_args.push(hp.to_string_lossy().into_owned());
+    }
     if has_meta {
         gia_args.push("-f".to_string());
         gia_args.push(meta_path.to_string_lossy().into_owned());
@@ -773,6 +826,9 @@ fn run_gia_diff(
         Err(e) => format!("Error waiting for gia: {e}"),
     };
 
+    if let Some(ref hp) = header_path {
+        let _ = std::fs::remove_file(hp);
+    }
     if has_meta {
         let _ = std::fs::remove_file(&meta_path);
     }
@@ -798,9 +854,18 @@ fn run_gia_log(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) ->
         return "No commits found in this range.".to_string();
     }
 
+    let label1 = get_ref_label(repo_path, sha1);
+    let label2 = get_ref_label(repo_path, sha2);
+    let header_path = write_header_file(&label1, &label2);
+
     let effective_prompt = prompt.unwrap_or(DEFAULT_LOG_PROMPT);
+    let mut gia_args: Vec<String> = vec![effective_prompt.to_string()];
+    if let Some(ref hp) = header_path {
+        gia_args.push("-f".to_string());
+        gia_args.push(hp.to_string_lossy().into_owned());
+    }
     let mut gia = match std::process::Command::new("gia")
-        .arg(effective_prompt)
+        .args(&gia_args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -814,7 +879,7 @@ fn run_gia_log(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) ->
         let _ = stdin.write_all(&log_out.stdout);
     }
 
-    match gia.wait_with_output() {
+    let result = match gia.wait_with_output() {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if stdout.is_empty() {
@@ -824,7 +889,13 @@ fn run_gia_log(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) ->
             }
         }
         Err(e) => format!("Error waiting for gia: {e}"),
+    };
+
+    if let Some(ref hp) = header_path {
+        let _ = std::fs::remove_file(hp);
     }
+
+    result
 }
 
 fn run_gia_log_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>) {
@@ -844,9 +915,18 @@ fn run_gia_log_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&
         }
     };
 
+    let label1 = get_ref_label(repo_path, sha1);
+    let label2 = get_ref_label(repo_path, sha2);
+    let header_path = write_header_file(&label1, &label2);
+
     let effective_prompt = prompt.unwrap_or(DEFAULT_LOG_PROMPT);
+    let mut gia_args: Vec<String> = vec!["-b".to_string(), effective_prompt.to_string()];
+    if let Some(ref hp) = header_path {
+        gia_args.push("-f".to_string());
+        gia_args.push(hp.to_string_lossy().into_owned());
+    }
     let mut gia = match std::process::Command::new("gia")
-        .args(["-b", effective_prompt])
+        .args(&gia_args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -863,6 +943,10 @@ fn run_gia_log_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&
         let _ = stdin.write_all(&log_out.stdout);
     }
     let _ = gia.wait();
+
+    if let Some(ref hp) = header_path {
+        let _ = std::fs::remove_file(hp);
+    }
 }
 
 fn serve_git_log(repo_path: &str, sha1: &str, sha2: &str) -> String {
