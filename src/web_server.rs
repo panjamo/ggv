@@ -79,7 +79,7 @@ const DEFAULT_LOG_PROMPT: &str = "Summarize the commit history. Focus on what ch
 
 /// Git log format used as metadata context when feeding diffs to the AI.
 const GIT_LOG_METADATA_FORMAT: &str =
-    "--pretty=format:commit %H%nRefs: %D%nAuthor: %an <%ae>%nDate: %ci%nSubject: %s%n";
+    "--pretty=format:commit %h%nRefs: %D%nAuthor: %an <%ae>%nDate: %ci%nSubject: %s%n";
 
 /// Minimal HTML page that closes itself — sent after fire-and-forget browser actions.
 const HTML_CLOSE_WINDOW: &str = "<html><body><script>window.close();</script></body></html>";
@@ -992,7 +992,7 @@ fn serve_git_log(repo_path: &str, sha1: &str, sha2: &str) -> String {
             "-C",
             repo_path,
             "log",
-            "--pretty=format:commit %H%nAuthor: %an <%ae>%nDate:   %ci%nRefs:   %D%n%n    %s%n%n    %b",
+            "--pretty=format:### %h, %ar, %ci, %D%n%n%s%n%b%n",
             &exclude_base,
             sha1,
             sha2,
