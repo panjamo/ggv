@@ -26,6 +26,11 @@ pub fn base_url(port: u16) -> String {
     format!("http://[::1]:{}", port)
 }
 
+/// Appends a language instruction to a prompt string.
+fn with_lang(prompt: &str, lang: &str) -> String {
+    format!("{}\nRespond in the language of locale: {}.", prompt, lang)
+}
+
 /// Binds to the given port (0 = OS-assigned) and spawns the server thread.
 /// Returns the join handle and the actual bound port.
 pub fn start(
@@ -34,6 +39,7 @@ pub fn start(
     svg_path: String,
     gia_browser: bool,
     prompt: Option<String>,
+    lang: String,
 ) -> anyhow::Result<(std::thread::JoinHandle<()>, u16)> {
     let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
     let listener = TcpListener::bind(addr)?;
@@ -43,7 +49,7 @@ pub fn start(
         actual_port
     );
     let handle = std::thread::spawn(move || {
-        run_server(listener, &repo_path, &svg_path, gia_browser, prompt)
+        run_server(listener, &repo_path, &svg_path, gia_browser, prompt, &lang)
     });
     Ok((handle, actual_port))
 }
@@ -54,6 +60,7 @@ fn run_server(
     svg_path: &str,
     gia_browser: bool,
     prompt: Option<String>,
+    lang: &str,
 ) {
     for stream in listener.incoming() {
         match stream {
@@ -61,8 +68,16 @@ fn run_server(
                 let repo_clone = repo_path.to_string();
                 let svg_clone = svg_path.to_string();
                 let prompt_clone = prompt.clone();
+                let lang_clone = lang.to_string();
                 std::thread::spawn(move || {
-                    handle_connection(stream, &repo_clone, &svg_clone, gia_browser, prompt_clone)
+                    handle_connection(
+                        stream,
+                        &repo_clone,
+                        &svg_clone,
+                        gia_browser,
+                        prompt_clone,
+                        &lang_clone,
+                    )
                 });
             }
             Err(e) => eprintln!("Connection error: {}", e),
@@ -76,6 +91,7 @@ fn handle_connection(
     svg_path: &str,
     gia_browser: bool,
     prompt: Option<String>,
+    lang: &str,
 ) {
     let reader = BufReader::new(match stream.try_clone() {
         Ok(s) => s,
@@ -189,9 +205,10 @@ fn handle_connection(
                 );
                 return;
             }
-            let effective_prompt = prompt.as_deref();
+            let base_prompt = prompt.as_deref().unwrap_or(DEFAULT_DIFF_PROMPT).to_string();
+            let effective_prompt = with_lang(&base_prompt, lang);
             if gia_browser {
-                run_gia_browser(repo_path, &sha1, &sha2, effective_prompt);
+                run_gia_browser(repo_path, &sha1, &sha2, Some(&effective_prompt));
                 send_response(
                     &mut stream,
                     200,
@@ -199,7 +216,13 @@ fn handle_connection(
                     HTML_CLOSE_WINDOW,
                 );
             } else {
-                let summary = run_gia_diff(repo_path, &sha1, &sha2, effective_prompt, include_log);
+                let summary = run_gia_diff(
+                    repo_path,
+                    &sha1,
+                    &sha2,
+                    Some(&effective_prompt),
+                    include_log,
+                );
                 let html = build_html(
                     &sha1[..sha1.len().min(7)],
                     &sha2[..sha2.len().min(7)],
@@ -233,9 +256,10 @@ fn handle_connection(
                 );
                 return;
             }
-            let effective_prompt = prompt.as_deref();
+            let base_prompt = prompt.as_deref().unwrap_or(DEFAULT_LOG_PROMPT).to_string();
+            let effective_prompt = with_lang(&base_prompt, lang);
             if gia_browser {
-                run_gia_log_browser(repo_path, &sha1, &sha2, effective_prompt);
+                run_gia_log_browser(repo_path, &sha1, &sha2, Some(&effective_prompt));
                 send_response(
                     &mut stream,
                     200,
@@ -243,7 +267,7 @@ fn handle_connection(
                     HTML_CLOSE_WINDOW,
                 );
             } else {
-                let summary = run_gia_log(repo_path, &sha1, &sha2, effective_prompt);
+                let summary = run_gia_log(repo_path, &sha1, &sha2, Some(&effective_prompt));
                 let html = build_html(
                     &sha1[..sha1.len().min(7)],
                     &sha2[..sha2.len().min(7)],

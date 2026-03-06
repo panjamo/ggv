@@ -104,4 +104,12 @@ pub struct Args {
         help = "Custom prompt passed to gia via -c (overrides the built-in default prompt)"
     )]
     pub gia_prompt: Option<String>,
+
+    #[arg(
+        short = 'l',
+        long,
+        help = "Language locale for AI output (e.g. de-DE, en-US, fr-FR)",
+        default_value = "de-DE"
+    )]
+    pub lang: String,
 }

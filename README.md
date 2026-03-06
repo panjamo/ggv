@@ -20,6 +20,7 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **Graph Tooltip**: Hover the SVG background to see the repository name, current branch, HEAD commit, author, and date
 - **AI Diff Server**: Start a local web server (`-w`) that opens `git difftool` when you left-click an edge count label; right-clicking always offers AI diff options (full diff+log, diff-only, log-only)
 - **Smart AI Diff**: AI summaries use merge-base detection to produce the correct snapshot diff (`git diff`) enriched with structured commit metadata (`git log`) passed to gia as additional context; a "diff-only" variant skips the log metadata for a more focused summary
+- **Multilingual AI Output**: AI summaries are delivered in a configurable language (`-l`/`--lang`, e.g. `de-DE`, `en-US`, `fr-FR`); German is the default
 - **Cross-Platform**: Works on Windows, macOS, and Linux
 
 ## Prerequisites
@@ -83,6 +84,7 @@ Options:
   -P, --web-port <PORT>     Port for the diff server (0 = OS-assigned) [default: 0]
   -b, --gia-browser         Pass -b to gia — gia opens its own browser window
   -p, --gia-prompt <TEXT>   Custom prompt passed to gia (overrides built-in default)
+  -l, --lang <LOCALE>       Language locale for AI output (e.g. de-DE, en-US, fr-FR) [default: de-DE]
   -h, --help                Print help
   -V, --version             Print version
 ```
@@ -192,10 +194,18 @@ Use a custom prompt:
 ggv -w -p "list the changed files and explain each change in one sentence"
 ```
 
+Set AI output language (default is German):
+
+```bash
+ggv -w --lang en-US
+ggv -w --lang fr-FR
+```
+
 Combined:
 
 ```bash
 ggv -w -b -p "summarize in three bullet points"
+ggv -w -b --lang en-US
 ```
 
 The process stays alive after the SVG is opened, serving requests until Ctrl+C. Each `ggv -w` instance gets its own OS-assigned port, so multiple instances can run simultaneously.

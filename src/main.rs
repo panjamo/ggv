@@ -68,6 +68,7 @@ fn main() -> Result<()> {
             svg_path.clone(),
             args.gia_browser,
             args.gia_prompt,
+            args.lang,
         )
         .context("Failed to start diff web server")?;
         (Some(handle), Some(web_server::base_url(port)))
