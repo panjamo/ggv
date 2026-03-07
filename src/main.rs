@@ -78,7 +78,6 @@ fn main() -> Result<()> {
             args.web_port,
             args.repo_path.clone(),
             svg_path.clone(),
-            args.gia_browser,
             args.gia_prompt,
             args.lang,
             args.gia_audio,

@@ -91,15 +91,6 @@ pub struct Args {
     pub web_port: u16,
 
     #[arg(
-        short = 'b',
-        long,
-        help = "Deactivate gia browser mode; returns text instead of opening its own browser window",
-        action = clap::ArgAction::SetFalse,
-        default_value_t = true
-    )]
-    pub gia_browser: bool,
-
-    #[arg(
         short = 'p',
         long,
         help = "Custom prompt passed to gia via -c (overrides the built-in default prompt)"

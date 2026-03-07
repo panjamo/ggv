@@ -67,14 +67,11 @@ fn regenerate(config: &RegenerateConfig) {
     }
 }
 
-const DEFAULT_BROWSER_PROMPT: &str = "Summarize the changes.
+const DEFAULT_DIFF_PROMPT: &str = "Summarize the changes.
         At the beginning, I would like a paragraph that is two sentences long, where everything is summarized very briefly.
         After that, you can calmly write a bit more.
         The summary should be nicely characterized by headings.
         Structure the whole thing.";
-
-const DEFAULT_DIFF_PROMPT: &str = "short summarize the git diff output, focus on the most important changes and their implications.
-        The summary should be concise and structured with headings if needed.";
 
 const DEFAULT_LOG_PROMPT: &str = "Summarize the commit history. Focus on what changed and why, based on commit messages and file names only.
         Be concise and structured with headings if needed.";
@@ -82,9 +79,6 @@ const DEFAULT_LOG_PROMPT: &str = "Summarize the commit history. Focus on what ch
 /// Git log format used as metadata context when feeding diffs to the AI.
 const GIT_LOG_METADATA_FORMAT: &str =
     "--pretty=format:commit %h%nRefs: %D%nAuthor: %an <%ae>%nDate: %ci%nSubject: %s%n";
-
-/// Minimal HTML page that closes itself — sent after fire-and-forget browser actions.
-const HTML_CLOSE_WINDOW: &str = "<html><body><script>window.close();</script></body></html>";
 
 /// URL-encoded text shown in gia's audio recording dialog.
 const AUDIO_DIALOG_TEXT: &str =
@@ -121,7 +115,6 @@ pub fn start(
     port: u16,
     repo_path: String,
     svg_path: String,
-    gia_browser: bool,
     prompt: Option<String>,
     lang: String,
     gia_audio: bool,
@@ -141,15 +134,7 @@ pub fn start(
     let regen = regen.map(Arc::new);
     let handle = std::thread::spawn(move || {
         run_server(
-            listener,
-            &repo_path,
-            &svg_path,
-            gia_browser,
-            prompt,
-            &lang,
-            gia_audio,
-            theme,
-            regen,
+            listener, &repo_path, &svg_path, prompt, &lang, gia_audio, theme, regen,
         )
     });
     Ok((handle, actual_port))
@@ -159,7 +144,6 @@ fn run_server(
     listener: TcpListener,
     repo_path: &str,
     svg_path: &str,
-    gia_browser: bool,
     prompt: Option<String>,
     lang: &str,
     gia_audio: bool,
@@ -179,7 +163,6 @@ fn run_server(
                         stream,
                         &repo_clone,
                         &svg_clone,
-                        gia_browser,
                         prompt_clone,
                         &lang_clone,
                         gia_audio,
@@ -197,7 +180,6 @@ fn handle_connection(
     mut stream: TcpStream,
     repo_path: &str,
     svg_path: &str,
-    gia_browser: bool,
     prompt: Option<String>,
     lang: &str,
     gia_audio: bool,
@@ -312,7 +294,7 @@ fn handle_connection(
                     &mut stream,
                     200,
                     "text/html; charset=utf-8",
-                    HTML_CLOSE_WINDOW,
+                    "<html><body><script>window.close();</script></body></html>",
                 );
                 return;
             }
@@ -333,31 +315,21 @@ fn handle_connection(
             } else {
                 effective_prompt
             };
-            if gia_browser {
-                run_gia_browser(repo_path, &sha1, &sha2, Some(&effective_prompt), gia_audio);
-                send_response(
-                    &mut stream,
-                    200,
-                    "text/html; charset=utf-8",
-                    HTML_CLOSE_WINDOW,
-                );
-            } else {
-                let summary = run_gia_diff(
-                    repo_path,
-                    &sha1,
-                    &sha2,
-                    Some(&effective_prompt),
-                    include_log,
-                    gia_audio,
-                );
-                let html = build_html(
-                    &sha1[..sha1.len().min(7)],
-                    &sha2[..sha2.len().min(7)],
-                    &summary,
-                    theme,
-                );
-                send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
-            }
+            let summary = run_gia_diff(
+                repo_path,
+                &sha1,
+                &sha2,
+                Some(&effective_prompt),
+                include_log,
+                gia_audio,
+            );
+            let html = build_html(
+                &sha1[..sha1.len().min(7)],
+                &sha2[..sha2.len().min(7)],
+                &summary,
+                theme,
+            );
+            send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
         }
         "/log-summary" => {
             let params = parse_query(query);
@@ -391,25 +363,14 @@ fn handle_connection(
             } else {
                 effective_prompt
             };
-            if gia_browser {
-                run_gia_log_browser(repo_path, &sha1, &sha2, Some(&effective_prompt), gia_audio);
-                send_response(
-                    &mut stream,
-                    200,
-                    "text/html; charset=utf-8",
-                    HTML_CLOSE_WINDOW,
-                );
-            } else {
-                let summary =
-                    run_gia_log(repo_path, &sha1, &sha2, Some(&effective_prompt), gia_audio);
-                let html = build_html(
-                    &sha1[..sha1.len().min(7)],
-                    &sha2[..sha2.len().min(7)],
-                    &summary,
-                    theme,
-                );
-                send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
-            }
+            let summary = run_gia_log(repo_path, &sha1, &sha2, Some(&effective_prompt), gia_audio);
+            let html = build_html(
+                &sha1[..sha1.len().min(7)],
+                &sha2[..sha2.len().min(7)],
+                &summary,
+                theme,
+            );
+            send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
         }
         "/log" => {
             let params = parse_query(query);
@@ -1000,86 +961,6 @@ fn bring_recording_window_to_foreground() {
     });
 }
 
-fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>, gia_audio: bool) {
-    let base = match resolve_diff_base(repo_path, sha1, sha2) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("Error resolving diff base: {e}");
-            return;
-        }
-    };
-
-    let diff = match std::process::Command::new("git")
-        .args(["-C", repo_path, "diff", &base, sha2])
-        .output()
-    {
-        Ok(out) => out.stdout,
-        Err(e) => {
-            eprintln!("git diff error: {e}");
-            return;
-        }
-    };
-
-    let metadata = git_log_metadata(repo_path, &base, sha1, sha2)
-        .map(|o| o.stdout)
-        .unwrap_or_default();
-
-    let meta_path = std::env::temp_dir().join("ggv_meta_browser.txt");
-    let has_meta = !metadata.is_empty() && std::fs::write(&meta_path, &metadata).is_ok();
-
-    let label1 = get_ref_label(repo_path, sha1);
-    let label2 = get_ref_label(repo_path, sha2);
-    let header_path = write_header_file(&label1, &label2);
-
-    let effective_prompt = prompt.unwrap_or(DEFAULT_BROWSER_PROMPT);
-    let mut gia_args: Vec<String> = vec!["-b".to_string(), effective_prompt.to_string()];
-    if gia_audio {
-        gia_args.push("-a".to_string());
-        gia_args.push("--audio-dialog-text".to_string());
-        gia_args.push(AUDIO_DIALOG_TEXT.to_string());
-    }
-    if let Some(ref hp) = header_path {
-        gia_args.push("-f".to_string());
-        gia_args.push(hp.to_string_lossy().into_owned());
-    }
-    if has_meta {
-        gia_args.push("-f".to_string());
-        gia_args.push(meta_path.to_string_lossy().into_owned());
-    }
-
-    let mut gia = match std::process::Command::new("gia")
-        .args(&gia_args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(e) => {
-            eprintln!("gia error: {e}");
-            return;
-        }
-    };
-
-    #[cfg(target_os = "windows")]
-    if gia_audio {
-        bring_recording_window_to_foreground();
-    }
-
-    if let Some(mut stdin) = gia.stdin.take() {
-        let _ = stdin.write_all(&diff);
-    }
-    // fire-and-forget: gia opens its own window
-    let _ = gia.wait();
-
-    if let Some(ref hp) = header_path {
-        let _ = std::fs::remove_file(hp);
-    }
-    if has_meta {
-        let _ = std::fs::remove_file(&meta_path);
-    }
-}
-
 fn resolve_diff_base(repo_path: &str, sha1: &str, sha2: &str) -> Result<String, String> {
     // Check if sha1 is a direct ancestor of sha2
     let ancestor_status = std::process::Command::new("git")
@@ -1294,73 +1175,6 @@ fn run_gia_log(
     }
 
     result
-}
-
-fn run_gia_log_browser(
-    repo_path: &str,
-    sha1: &str,
-    sha2: &str,
-    prompt: Option<&str>,
-    gia_audio: bool,
-) {
-    let base = match resolve_diff_base(repo_path, sha1, sha2) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("Error resolving log base: {e}");
-            return;
-        }
-    };
-
-    let log_out = match git_log_metadata(repo_path, &base, sha1, sha2) {
-        Ok(out) => out,
-        Err(e) => {
-            eprintln!("git log error: {e}");
-            return;
-        }
-    };
-
-    let label1 = get_ref_label(repo_path, sha1);
-    let label2 = get_ref_label(repo_path, sha2);
-    let header_path = write_header_file(&label1, &label2);
-
-    let effective_prompt = prompt.unwrap_or(DEFAULT_LOG_PROMPT);
-    let mut gia_args: Vec<String> = vec!["-b".to_string(), effective_prompt.to_string()];
-    if gia_audio {
-        gia_args.push("-a".to_string());
-        gia_args.push("--audio-dialog-text".to_string());
-        gia_args.push(AUDIO_DIALOG_TEXT.to_string());
-    }
-    if let Some(ref hp) = header_path {
-        gia_args.push("-f".to_string());
-        gia_args.push(hp.to_string_lossy().into_owned());
-    }
-    let mut gia = match std::process::Command::new("gia")
-        .args(&gia_args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(e) => {
-            eprintln!("gia error: {e}");
-            return;
-        }
-    };
-
-    #[cfg(target_os = "windows")]
-    if gia_audio {
-        bring_recording_window_to_foreground();
-    }
-
-    if let Some(mut stdin) = gia.stdin.take() {
-        let _ = stdin.write_all(&log_out.stdout);
-    }
-    let _ = gia.wait();
-
-    if let Some(ref hp) = header_path {
-        let _ = std::fs::remove_file(hp);
-    }
 }
 
 fn serve_git_log(repo_path: &str, sha1: &str, sha2: &str, theme: Theme) -> String {
