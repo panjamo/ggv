@@ -51,6 +51,13 @@ Always run the complete quality check sequence:
 - `add_tagged_commits()`, `add_root_commits()`, `add_branch_readmes()` — enrich commit nodes
 - `detect_gitlab_url()` / `parse_gitlab_remote_url()` — auto-detects GitLab base URL from the remote
 
+**Web Server (`web_server.rs`)**
+- Handles diff and AI summary requests from the SVG context menu
+- `diff2html_section()` — builds a self-contained HTML fragment with commit history cards and a side-by-side diff (diff2html embedded inline); appended after the AI summary in `build_html()`
+- `render_commit_cards()` — parses `git log --pretty=format:...` output into styled HTML cards with per-ref badge coloring
+- `build_html()` — assembles the full AI summary page; accepts an optional `diff_section` rendered below the Markdown summary card
+- diff2html CSS and JS are embedded as Rust string constants (no CDN dependency)
+
 **Utility Functions (`main.rs`)**
 - `find_dot_executable()` — locates `dot.exe` by checking (in order): `GRAPHVIZ_DOT` env var, common Windows installation directories, then `where`/`which` fallback
 - `generate_svg()` — calls `dot.exe` directly via `std::process::Command -Tsvg`; prints the resolved path
