@@ -162,9 +162,9 @@ window.addEventListener('load', function() {
       t.setAttribute('x', x + 10);
       if (/^\d+$/.test(t.textContent.trim())) {
         t.setAttribute('data-ggv-count', '1');
-        var n = parseInt(t.textContent.trim(), 10);
+        var fileCount = fileList ? fileList.split('\n').filter(Boolean).length : 0;
         var base = parseFloat(t.getAttribute('font-size')) || 10;
-        var scaled = base + Math.round(Math.sqrt(Math.max(0, n - 1)) * 1.5);
+        var scaled = base + Math.round(Math.sqrt(Math.max(0, fileCount - 1)) * 1.5);
         if (scaled > base) { t.setAttribute('font-size', scaled); }
         if (fileList) {
           var titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
