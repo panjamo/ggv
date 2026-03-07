@@ -18,7 +18,7 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **Drag-to-Compare**: Drag any commit node onto another to open a GitLab or GitHub compare view for that arbitrary range — order is corrected automatically (always `older...newer`)
 - **SHA Copy**: Click any commit node to copy its full 40-character SHA to the clipboard (amber border flash confirms)
 - **Graph Tooltip**: Hover the SVG background to see the repository name, current branch, HEAD commit, author, and date
-- **AI Diff Server**: Start a local web server (`-w`) that opens `git difftool` when you left-click an edge count label; right-clicking always offers AI diff options (full diff+log, diff-only, log-only)
+- **AI Diff Server**: A local web server starts automatically and opens `git difftool` when you left-click an edge count label; right-clicking always offers AI diff options (full diff+log, diff-only, log-only); pass `-s` / `--svg-only` to skip the server and generate a standalone SVG for sharing
 - **Smart AI Diff**: AI summaries use merge-base detection to produce the correct snapshot diff (`git diff`) enriched with structured commit metadata (`git log`) passed to gia as additional context; a "diff-only" variant skips the log metadata for a more focused summary
 - **Multilingual AI Output**: AI summaries are delivered in a configurable language (`-l`/`--lang`, e.g. `de-DE`, `en-US`, `fr-FR`); German is the default
 - **Rendered AI Output**: AI diff summaries are rendered as a styled HTML page in the browser — gia outputs Markdown which is converted to HTML on the fly; below the summary the page shows a commit history card list and a full side-by-side diff (via diff2html, embedded inline — no CDN required), with collapsible file sections
@@ -82,7 +82,7 @@ Options:
   -k, --keep-dot            Keep the intermediate DOT file after SVG generation
   -t, --theme <THEME>       Color theme: dark or light [default: dark]
   -c, --current-branch      Show only refs that are ancestors of HEAD
-  -w, --web-server          Start the diff web server
+  -s, --svg-only            Generate a standalone SVG without starting the web server
   -P, --web-port <PORT>     Port for the diff server (0 = OS-assigned) [default: 0]
   -p, --gia-prompt <TEXT>   Custom prompt passed to gia (overrides built-in default)
   -l, --lang <LOCALE>       Language locale for AI output (e.g. de-DE, en-US, fr-FR) [default: de-DE]
@@ -170,48 +170,51 @@ ggv -F v1.0.0 -c
 
 ### Diff Web Server
 
-Start the diff server alongside the graph. With `-w`, the SVG is served via the local web server (`http://[::1]:<port>/view`) instead of opened as a file, enabling same-origin requests for the context menu. Clicking the blue edge count label triggers the configured diff action.
+The diff web server starts automatically with every `ggv` run. The SVG is served via `http://[::1]:<port>/view` instead of opened as a file, enabling same-origin requests for the context menu. Clicking the blue edge count label triggers the configured diff action.
 
-Left-clicking a count label opens `git difftool -d sha1 sha2` in your configured diff tool. Right-clicking a count label gives AI diff options. AI summaries use merge-base detection; commit metadata (author, date, refs, changed files) is passed to gia as additional context:
+Left-clicking a count label opens `git difftool -d sha1 sha2` in your configured diff tool. Right-clicking a count label gives AI diff options. AI summaries use merge-base detection; commit metadata (author, date, refs, changed files) is passed to gia as additional context.
+
+To generate a plain SVG for sharing without starting the server:
 
 ```bash
-ggv -w
+ggv -s
+ggv --svg-only
 ```
 
 Use a fixed port (useful when the SVG will be reopened later):
 
 ```bash
-ggv -w -P 8080
+ggv -P 8080
 ```
 
 Use a custom prompt:
 
 ```bash
-ggv -w -p "list the changed files and explain each change in one sentence"
+ggv -p "list the changed files and explain each change in one sentence"
 ```
 
 Set AI output language (default is German):
 
 ```bash
-ggv -w --lang en-US
-ggv -w --lang fr-FR
+ggv --lang en-US
+ggv --lang fr-FR
 ```
 
 Deactivate audio input — gia will not record from the microphone:
 
 ```bash
-ggv -w -N
+ggv -N
 ```
 
 Combined:
 
 ```bash
-ggv -w -p "summarize in three bullet points"
-ggv -w --lang en-US
-ggv -w -N --lang en-US
+ggv -p "summarize in three bullet points"
+ggv --lang en-US
+ggv -N --lang en-US
 ```
 
-The process stays alive after the SVG is opened, serving requests until Ctrl+C. Each `ggv -w` instance gets its own OS-assigned port, so multiple instances can run simultaneously.
+The process stays alive after the SVG is opened, serving requests until Ctrl+C. Each `ggv` instance gets its own OS-assigned port, so multiple instances can run simultaneously.
 
 ## Output
 
@@ -263,13 +266,13 @@ Open the SVG in a browser to use all interactive features:
 | Hover an edge | Tooltip listing commits condensed into that range |
 | Click an edge | Opens the GitLab / GitHub compare view for that range |
 | Hover the blue edge count label | Tooltip listing the files changed between the two nodes |
-| Click the blue edge count label | Opens `git difftool` (requires `-w`) |
-| Right-click the blue edge count label | Context menu with AI diff options: full diff+log, diff-only, log-only (requires `-w`) |
+| Click the blue edge count label | Opens `git difftool` (requires web server, disabled by `-s`) |
+| Right-click the blue edge count label | Context menu with AI diff options: full diff+log, diff-only, log-only (requires web server, disabled by `-s`) |
 | Click a commit node | Copies the full 40-character SHA to the clipboard (amber flash confirms) |
 | Drag one commit node onto another | Opens the forge compare view for that range — always `older...newer` |
 | Ctrl + drag onto another node | Opens the diff web server diff for that range (requires `-w`) |
 | Hover the SVG background | Tooltip with repository name, branch, HEAD commit, author, and date |
-| Right-click a commit node | Context menu (requires `-w`) |
+| Right-click a commit node | Context menu (requires web server, disabled by `-s`) |
 
 #### Right-click context menu on commit nodes (requires `-w`)
 
@@ -289,6 +292,7 @@ When the diff web server is active, right-clicking any commit node opens a conte
 | Copy tag: \<name\> | Copies the tag name |
 | Delete local: \<name\> | Force-deletes the local branch (`git branch -D`) after confirmation |
 | Delete remote: \<name\> | Pushes a remote branch deletion (`git push <remote> --delete <branch>`) after confirmation |
+| Delete Tag (local + remote): \<name\> | Deletes the tag locally (`git tag -d`) and from all remotes (`git push <remote> --delete`) after confirmation |
 | Checkout branch | Runs `git checkout <branch>` for the branch at that commit |
 
 Branch and tag names are read directly from structured metadata embedded in the SVG — no text parsing heuristics.
@@ -300,7 +304,7 @@ Branch and tag names are read directly from structured metadata embedded in the 
 | AI Summary of Changes | AI diff+log summary via gia — shown in a new browser tab |
 | AI Summary (diff only) | AI summary using only the diff, no commit log metadata |
 
-Drag-to-compare requires a forge URL (auto-detected or set via `-g`). The blue edge count labels and context menus are only active when `-w` is used. Left-clicking a count label always opens `git difftool`.
+Drag-to-compare requires a forge URL (auto-detected or set via `-g`). The blue edge count labels and context menus are only active when the web server is running (default; disabled by `-s`). Left-clicking a count label always opens `git difftool`.
 
 ## Development
 
