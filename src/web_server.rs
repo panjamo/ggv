@@ -245,6 +245,21 @@ fn handle_connection(
                 std::thread::spawn(move || regenerate(&cfg));
             }
         }
+        "/delete-tag" => {
+            let params = parse_query(query);
+            let name = match params.get("name") {
+                Some(n) if is_valid_ref_name(n) => n.clone(),
+                _ => {
+                    send_response(&mut stream, 400, "text/plain", "Invalid or missing 'name'");
+                    return;
+                }
+            };
+            run_tag_delete(repo_path, &name);
+            send_response(&mut stream, 200, "text/plain", "OK");
+            if let Some(cfg) = regen {
+                std::thread::spawn(move || regenerate(&cfg));
+            }
+        }
         "/diff" => {
             let params = parse_query(query);
             let sha1 = match params.get("from") {
@@ -546,6 +561,25 @@ fn run_branch_delete(repo_path: &str, name: &str, scope: &str) {
                 .status();
         }
         _ => {}
+    }
+}
+
+fn run_tag_delete(repo_path: &str, name: &str) {
+    // Delete locally
+    let _ = std::process::Command::new("git")
+        .args(["-C", repo_path, "tag", "-d", name])
+        .status();
+    // Delete from all remotes
+    let remotes_out = std::process::Command::new("git")
+        .args(["-C", repo_path, "remote"])
+        .output();
+    if let Ok(out) = remotes_out {
+        let remotes = String::from_utf8_lossy(&out.stdout);
+        for remote in remotes.lines() {
+            let _ = std::process::Command::new("git")
+                .args(["-C", repo_path, "push", remote, "--delete", name])
+                .status();
+        }
     }
 }
 

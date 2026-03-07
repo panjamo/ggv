@@ -433,7 +433,7 @@ window.addEventListener('load', function() {
             navigator.clipboard.writeText(name);
           }));
         });
-        if (refs.local.length > 0 || refs.remote.length > 0) {
+        if (refs.local.length > 0 || refs.remote.length > 0 || refs.tags.length > 0) {
           ctxMenu.appendChild(makeDivider());
           refs.local.forEach(function(name) {
             ctxMenu.appendChild(makeMenuItem('Delete Local Branch: ' + name, function() {
@@ -445,6 +445,12 @@ window.addEventListener('load', function() {
             ctxMenu.appendChild(makeMenuItem('Delete Remote Branch: ' + name, function() {
               if (!confirm('Delete remote branch "' + name + '"?')) return;
               fetch(wsUrl + '/delete-branch?name=' + encodeURIComponent(name) + '&scope=remote');
+            }));
+          });
+          refs.tags.forEach(function(name) {
+            ctxMenu.appendChild(makeMenuItem('Delete Tag (local + remote): ' + name, function() {
+              if (!confirm('Delete tag "' + name + '" locally and from all remotes?')) return;
+              fetch(wsUrl + '/delete-tag?name=' + encodeURIComponent(name));
             }));
           });
         }
