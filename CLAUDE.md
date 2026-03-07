@@ -29,9 +29,10 @@ Always run the complete quality check sequence:
 
 ### Core Components
 
-**Args Struct (`main.rs`)**
+**Args Struct (`args.rs`)**
 - CLI argument parsing using clap with derive macros
 - Key options: `repo_path`, `output` (DOT file, default `ggv-<repo-name>.dot`), `no_show`, `filter`, `gitlab_url`
+- `web_server: bool` — defaults to `true`; set to `false` via `-s` / `--svg-only` to skip the web server and generate a standalone SVG
 
 **RefFilter (`main.rs`)**
 - Parses the `--filter` string (`b`=branches, `r`=remotes, `t`=tags, `h`=HEAD)
@@ -52,7 +53,9 @@ Always run the complete quality check sequence:
 - `detect_gitlab_url()` / `parse_gitlab_remote_url()` — auto-detects GitLab base URL from the remote
 
 **Web Server (`web_server.rs`)**
+- Started automatically unless `-s` / `--svg-only` is passed
 - Handles diff and AI summary requests from the SVG context menu
+- `/delete-tag` route: deletes a tag locally (`git tag -d`) then from all remotes (`git push <remote> --delete`); triggers SVG regeneration
 - `diff2html_section()` — builds a self-contained HTML fragment with commit history cards and a side-by-side diff (diff2html embedded inline); appended after the AI summary in `build_html()`
 - `render_commit_cards()` — parses `git log --pretty=format:...` output into styled HTML cards with per-ref badge coloring
 - `build_html()` — assembles the full AI summary page; accepts an optional `diff_section` rendered below the Markdown summary card

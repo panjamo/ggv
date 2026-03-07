@@ -75,10 +75,11 @@ pub struct Args {
     pub current_branch: bool,
 
     #[arg(
-        short = 'w',
-        long,
-        help = "Start a local web server that runs 'git diff | gia' and shows a summary page when clicking edges",
-        action = clap::ArgAction::SetTrue
+        short = 's',
+        long = "svg-only",
+        help = "Generate a standalone SVG for sharing without starting the web server",
+        action = clap::ArgAction::SetFalse,
+        default_value_t = true
     )]
     pub web_server: bool,
 
