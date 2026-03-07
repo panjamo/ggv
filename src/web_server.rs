@@ -291,9 +291,11 @@ fn handle_connection(
 
             let force_ai = params.get("ai").map(|v| v == "1").unwrap_or(false);
             let include_log = !params.get("nolog").map(|v| v == "1").unwrap_or(false);
+            let filter_str = params.get("filter").cloned().unwrap_or_default();
+            let pathspecs = parse_pathspec(&filter_str);
 
             if !force_ai {
-                if has_git_diff(repo_path, &sha1, &sha2) {
+                if has_git_diff(repo_path, &sha1, &sha2, &[]) {
                     run_git_difftool(repo_path, &sha1, &sha2);
                 } else {
                     send_response(
@@ -316,7 +318,7 @@ fn handle_connection(
                 return;
             }
 
-            if !has_git_diff(repo_path, &sha1, &sha2) {
+            if !has_git_diff(repo_path, &sha1, &sha2, &pathspecs) {
                 send_response(
                     &mut stream,
                     200,
@@ -339,12 +341,19 @@ fn handle_connection(
                 Some(&effective_prompt),
                 include_log,
                 gia_audio,
+                &pathspecs,
             );
             if summary.is_empty() {
-                send_response(&mut stream, 200, "text/html; charset=utf-8", "<script>window.close();</script>");
+                send_response(
+                    &mut stream,
+                    200,
+                    "text/html; charset=utf-8",
+                    "<script>window.close();</script>",
+                );
                 return;
             }
-            let diff_section = diff2html_section(repo_path, &sha1, &sha2, theme).ok();
+            let diff_section =
+                diff2html_section(repo_path, &sha1, &sha2, theme, &pathspecs, &filter_str).ok();
             let html = build_html(
                 &sha1[..sha1.len().min(7)],
                 &sha2[..sha2.len().min(7)],
@@ -370,7 +379,9 @@ fn handle_connection(
                     return;
                 }
             };
-            if !has_git_diff(repo_path, &sha1, &sha2) {
+            let filter_str = params.get("filter").cloned().unwrap_or_default();
+            let pathspecs = parse_pathspec(&filter_str);
+            if !has_git_diff(repo_path, &sha1, &sha2, &[]) {
                 send_response(
                     &mut stream,
                     200,
@@ -388,10 +399,16 @@ fn handle_connection(
             };
             let summary = run_gia_log(repo_path, &sha1, &sha2, Some(&effective_prompt), gia_audio);
             if summary.is_empty() {
-                send_response(&mut stream, 200, "text/html; charset=utf-8", "<script>window.close();</script>");
+                send_response(
+                    &mut stream,
+                    200,
+                    "text/html; charset=utf-8",
+                    "<script>window.close();</script>",
+                );
                 return;
             }
-            let diff_section = diff2html_section(repo_path, &sha1, &sha2, theme).ok();
+            let diff_section =
+                diff2html_section(repo_path, &sha1, &sha2, theme, &pathspecs, &filter_str).ok();
             let html = build_html(
                 &sha1[..sha1.len().min(7)],
                 &sha2[..sha2.len().min(7)],
@@ -417,7 +434,7 @@ fn handle_connection(
                     return;
                 }
             };
-            if !has_git_diff(repo_path, &sha1, &sha2) {
+            if !has_git_diff(repo_path, &sha1, &sha2, &[]) {
                 send_response(
                     &mut stream,
                     200,
@@ -445,7 +462,9 @@ fn handle_connection(
                     return;
                 }
             };
-            if !has_git_diff(repo_path, &sha1, &sha2) {
+            let filter_str = params.get("filter").cloned().unwrap_or_default();
+            let pathspecs = parse_pathspec(&filter_str);
+            if !has_git_diff(repo_path, &sha1, &sha2, &pathspecs) {
                 send_response(
                     &mut stream,
                     200,
@@ -454,7 +473,7 @@ fn handle_connection(
                 );
                 return;
             }
-            match run_diff2html(repo_path, &sha1, &sha2, theme) {
+            match run_diff2html(repo_path, &sha1, &sha2, theme, &pathspecs, &filter_str) {
                 Ok(html) => send_response(&mut stream, 200, "text/html; charset=utf-8", &html),
                 Err(e) => send_response(&mut stream, 500, "text/plain", &e),
             }
@@ -518,7 +537,42 @@ fn serve_svg(stream: &mut TcpStream, svg_path: &str, repo_name: &str) {
 }})();
 </script>
 </head>
-<body>{}</body>
+<body>{}
+<div id="ggv-flt-bar" style="position:fixed;top:10px;right:10px;z-index:1000;display:flex;align-items:center;gap:6px;background:#1a1f2e;border:1px solid #2d3748;border-radius:6px;padding:5px 10px;font-family:'Segoe UI',sans-serif;font-size:12px;">
+  <span style="color:#718096;white-space:nowrap;">Filter:</span>
+  <input id="ggv-flt-inp" type="text" placeholder="*.cpp *.h" style="width:160px;padding:3px 6px;border:1px solid #2d3748;border-radius:4px;background:#0f1117;color:#e2e8f0;font-family:monospace;font-size:11px;">
+  <button onclick="ggvSave()" style="padding:2px 8px;border-radius:4px;cursor:pointer;border:1px solid #2d3748;background:#1a1f2e;color:#e2e8f0;font-size:11px;">Set</button>
+  <button onclick="ggvClear()" style="padding:2px 8px;border-radius:4px;cursor:pointer;border:1px solid #2d3748;background:#1a1f2e;color:#718096;font-size:11px;">✕</button>
+  <span id="ggv-flt-ind" style="color:#f6ad55;font-size:10px;display:none;">●</span>
+</div>
+<script>
+(function(){{
+  var inp = document.getElementById('ggv-flt-inp');
+  var ind = document.getElementById('ggv-flt-ind');
+  function refresh() {{
+    var v = localStorage.getItem('ggv-diff-filter') || '';
+    inp.value = v;
+    ind.style.display = v ? 'inline' : 'none';
+    ind.title = v ? 'Active filter: ' + v : '';
+  }}
+  refresh();
+  document.addEventListener('visibilitychange', function() {{ if (!document.hidden) refresh(); }});
+  window.addEventListener('focus', refresh);
+  inp.addEventListener('keydown', function(e){{ if(e.key==='Enter') ggvSave(); }});
+  window.ggvSave = function(){{
+    var v = inp.value.trim();
+    if(v) localStorage.setItem('ggv-diff-filter', v);
+    else localStorage.removeItem('ggv-diff-filter');
+    refresh();
+  }};
+  window.ggvClear = function(){{
+    localStorage.removeItem('ggv-diff-filter');
+    inp.value = '';
+    refresh();
+  }};
+}})();
+</script>
+</body>
 </html>"#,
         svg_body
     );
@@ -642,6 +696,23 @@ fn parse_query(query: &str) -> HashMap<String, String> {
     map
 }
 
+/// Splits a filter string (e.g. "*.cpp *.h") into validated pathspec tokens.
+/// Allows: alphanumeric, `*`, `?`, `.`, `/`, `-`, `_`, `[`, `]`.
+fn parse_pathspec(filter: &str) -> Vec<String> {
+    filter
+        .split_whitespace()
+        .filter(|s| {
+            !s.is_empty()
+                && s.len() <= 200
+                && s.chars().all(|c| {
+                    c.is_alphanumeric()
+                        || matches!(c, '*' | '?' | '.' | '/' | '-' | '_' | '[' | ']')
+                })
+        })
+        .map(|s| s.to_string())
+        .collect()
+}
+
 fn git_log_metadata(
     repo_path: &str,
     base: &str,
@@ -697,12 +768,14 @@ fn write_header_file(label1: &str, label2: &str) -> Option<std::path::PathBuf> {
     Some(path)
 }
 
-fn has_git_diff(repo_path: &str, sha1: &str, sha2: &str) -> bool {
-    std::process::Command::new("git")
-        .args(["-C", repo_path, "diff", "--quiet", sha1, sha2])
-        .status()
-        .map(|s| !s.success())
-        .unwrap_or(true)
+fn has_git_diff(repo_path: &str, sha1: &str, sha2: &str, pathspecs: &[String]) -> bool {
+    let mut cmd = std::process::Command::new("git");
+    cmd.args(["-C", repo_path, "diff", "--quiet", sha1, sha2]);
+    if !pathspecs.is_empty() {
+        cmd.arg("--");
+        cmd.args(pathspecs);
+    }
+    cmd.status().map(|s| !s.success()).unwrap_or(true)
 }
 
 fn build_no_diff_html(sha1: &str, sha2: &str, theme: Theme) -> String {
@@ -774,6 +847,8 @@ fn diff2html_section(
     sha1: &str,
     sha2: &str,
     theme: Theme,
+    pathspecs: &[String],
+    filter_str: &str,
 ) -> Result<String, String> {
     let sha1_is_ancestor = std::process::Command::new("git")
         .args(["-C", repo_path, "merge-base", "--is-ancestor", sha1, sha2])
@@ -786,8 +861,13 @@ fn diff2html_section(
         (sha2, sha1)
     };
 
-    let diff_bytes = std::process::Command::new("git")
-        .args(["-C", repo_path, "diff", older, newer])
+    let mut diff_cmd = std::process::Command::new("git");
+    diff_cmd.args(["-C", repo_path, "diff", older, newer]);
+    if !pathspecs.is_empty() {
+        diff_cmd.arg("--");
+        diff_cmd.args(pathspecs);
+    }
+    let diff_bytes = diff_cmd
         .output()
         .map_err(|e| format!("git diff failed: {e}"))?
         .stdout;
@@ -828,6 +908,7 @@ fn diff2html_section(
     let s1 = &sha1[..sha1.len().min(7)];
     let s2 = &sha2[..sha2.len().min(7)];
     let diff_json = to_json_string(&raw_diff);
+    let filter_json = to_json_string(filter_str);
 
     let (
         bg,
@@ -866,12 +947,32 @@ fn diff2html_section(
 
     Ok(format!(
         r#"<style>
+/* ── File filter bar ── */
+.ggv-filter-bar {{
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 16px; background: {bg}; border-bottom: 1px solid {section_border};
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px; margin-top: 32px; border-top: 2px solid {section_border};
+}}
+.ggv-flt-label {{ color: {text}; white-space: nowrap; }}
+.ggv-flt-input {{
+  flex: 1; max-width: 360px; padding: 4px 8px;
+  border: 1px solid {section_border}; border-radius: 4px;
+  background: {card_bg}; color: {text};
+  font-family: monospace; font-size: 12px;
+}}
+.ggv-flt-btn {{
+  padding: 4px 12px; border-radius: 4px; cursor: pointer;
+  border: 1px solid {section_border}; background: {card_bg}; color: {text};
+  font-size: 12px;
+}}
+.ggv-flt-btn:hover {{ background: {card_border}; }}
+.ggv-flt-active {{ color: #f6ad55; font-size: 11px; white-space: nowrap; }}
 /* ── Commit history section ── */
 .ggv-history {{
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: {bg}; color: {text};
-  padding: 24px 16px 0; margin-top: 32px;
-  border-top: 2px solid {section_border};
+  padding: 24px 16px 0;
 }}
 .ggv-history .page {{ max-width: 1200px; margin: 0 auto; padding-bottom: 24px; border-bottom: 2px solid {section_border}; }}
 .ggv-history .hdr {{
@@ -934,6 +1035,12 @@ fn diff2html_section(
 .ggv-file-body {{ overflow: hidden; }}
 .ggv-file-body.ggv-collapsed {{ display: none; }}
 </style>
+<div class="ggv-filter-bar">
+  <span class="ggv-flt-label">File filter:</span>
+  <input id="ggv-flt" class="ggv-flt-input" type="text" placeholder="*.cpp *.h  or  src/ *.cs">
+  <button class="ggv-flt-btn" onclick="ggvApplyFilter()">Apply</button>
+  <button class="ggv-flt-btn" onclick="ggvClearFilter()">Clear</button>
+</div>
 <div class="ggv-history">
   <div class="page">
     <div class="hdr">
@@ -971,18 +1078,46 @@ document.querySelectorAll('.d2h-file-wrapper').forEach(function(wrapper) {{
     header.classList.toggle('ggv-collapsed', collapsed);
   }});
 }});
+(function(){{
+  var inp = document.getElementById('ggv-flt');
+  var active = {filter_json};
+  inp.value = active || localStorage.getItem('ggv-diff-filter') || '';
+  inp.addEventListener('keydown', function(e){{ if(e.key==='Enter') ggvApplyFilter(); }});
+}})();
+function ggvApplyFilter(){{
+  var v = document.getElementById('ggv-flt').value.trim();
+  if (v) localStorage.setItem('ggv-diff-filter', v);
+  else localStorage.removeItem('ggv-diff-filter');
+  var u = new URL(window.location.href);
+  if(v){{ u.searchParams.set('filter',v); }} else {{ u.searchParams.delete('filter'); }}
+  window.location.href = u.toString();
+}}
+function ggvClearFilter(){{
+  localStorage.removeItem('ggv-diff-filter');
+  var u = new URL(window.location.href);
+  u.searchParams.delete('filter');
+  window.location.href = u.toString();
+}}
 </script>"#,
         css = DIFF2HTML_CSS,
         js = DIFF2HTML_JS,
         s1 = s1,
         s2 = s2,
         diff_json = diff_json,
+        filter_json = filter_json,
         commit_cards = commit_cards,
         count_label = count_label,
     ))
 }
 
-fn run_diff2html(repo_path: &str, sha1: &str, sha2: &str, theme: Theme) -> Result<String, String> {
+fn run_diff2html(
+    repo_path: &str,
+    sha1: &str,
+    sha2: &str,
+    theme: Theme,
+    pathspecs: &[String],
+    filter_str: &str,
+) -> Result<String, String> {
     // Determine chronological order so we always diff older → newer
     let sha1_is_ancestor = std::process::Command::new("git")
         .args(["-C", repo_path, "merge-base", "--is-ancestor", sha1, sha2])
@@ -995,8 +1130,13 @@ fn run_diff2html(repo_path: &str, sha1: &str, sha2: &str, theme: Theme) -> Resul
         (sha2, sha1)
     };
 
-    let diff_bytes = std::process::Command::new("git")
-        .args(["-C", repo_path, "diff", older, newer])
+    let mut diff_cmd = std::process::Command::new("git");
+    diff_cmd.args(["-C", repo_path, "diff", older, newer]);
+    if !pathspecs.is_empty() {
+        diff_cmd.arg("--");
+        diff_cmd.args(pathspecs);
+    }
+    let diff_bytes = diff_cmd
         .output()
         .map_err(|e| format!("git diff failed: {e}"))?
         .stdout;
@@ -1038,6 +1178,7 @@ fn run_diff2html(repo_path: &str, sha1: &str, sha2: &str, theme: Theme) -> Resul
     let s1 = &sha1[..sha1.len().min(7)];
     let s2 = &sha2[..sha2.len().min(7)];
     let diff_json = to_json_string(&raw_diff);
+    let filter_json = to_json_string(filter_str);
 
     // Theme palette for the commit history section
     let (
@@ -1149,9 +1290,35 @@ fn run_diff2html(repo_path: &str, sha1: &str, sha2: &str, theme: Theme) -> Resul
 .ggv-collapsed .ggv-toggle {{ transform: rotate(-90deg); }}
 .ggv-file-body {{ overflow: hidden; }}
 .ggv-file-body.ggv-collapsed {{ display: none; }}
+/* ── File filter bar ── */
+.ggv-filter-bar {{
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 16px; background: {bg}; border-bottom: 1px solid {section_border};
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px; position: sticky; top: 0; z-index: 100;
+}}
+.ggv-flt-label {{ color: {text}; white-space: nowrap; }}
+.ggv-flt-input {{
+  flex: 1; max-width: 360px; padding: 4px 8px;
+  border: 1px solid {section_border}; border-radius: 4px;
+  background: {card_bg}; color: {text};
+  font-family: monospace; font-size: 12px;
+}}
+.ggv-flt-btn {{
+  padding: 4px 12px; border-radius: 4px; cursor: pointer;
+  border: 1px solid {section_border}; background: {card_bg}; color: {text};
+  font-size: 12px;
+}}
+.ggv-flt-btn:hover {{ background: {card_border}; }}
 </style>
 </head>
 <body>
+<div class="ggv-filter-bar">
+  <span class="ggv-flt-label">File filter:</span>
+  <input id="ggv-flt" class="ggv-flt-input" type="text" placeholder="*.cpp *.h  or  src/ *.cs">
+  <button class="ggv-flt-btn" onclick="ggvApplyFilter()">Apply</button>
+  <button class="ggv-flt-btn" onclick="ggvClearFilter()">Clear</button>
+</div>
 <div class="ggv-history">
   <div class="page">
     <div class="hdr">
@@ -1189,6 +1356,26 @@ document.querySelectorAll('.d2h-file-wrapper').forEach(function(wrapper) {{
     header.classList.toggle('ggv-collapsed', collapsed);
   }});
 }});
+(function(){{
+  var inp = document.getElementById('ggv-flt');
+  var active = {filter_json};
+  inp.value = active || localStorage.getItem('ggv-diff-filter') || '';
+  inp.addEventListener('keydown', function(e){{ if(e.key==='Enter') ggvApplyFilter(); }});
+}})();
+function ggvApplyFilter(){{
+  var v = document.getElementById('ggv-flt').value.trim();
+  if (v) localStorage.setItem('ggv-diff-filter', v);
+  else localStorage.removeItem('ggv-diff-filter');
+  var u = new URL(window.location.href);
+  if(v){{ u.searchParams.set('filter',v); }} else {{ u.searchParams.delete('filter'); }}
+  window.location.href = u.toString();
+}}
+function ggvClearFilter(){{
+  localStorage.removeItem('ggv-diff-filter');
+  var u = new URL(window.location.href);
+  u.searchParams.delete('filter');
+  window.location.href = u.toString();
+}}
 </script>
 </body>
 </html>"#,
@@ -1197,6 +1384,7 @@ document.querySelectorAll('.d2h-file-wrapper').forEach(function(wrapper) {{
         s1 = s1,
         s2 = s2,
         diff_json = diff_json,
+        filter_json = filter_json,
         commit_cards = commit_cards,
         count_label = count_label,
     );
@@ -1273,6 +1461,7 @@ fn run_gia_diff(
     prompt: Option<&str>,
     include_log: bool,
     gia_audio: bool,
+    pathspecs: &[String],
 ) -> String {
     let base = match resolve_diff_base(repo_path, sha1, sha2) {
         Ok(b) => b,
@@ -1280,10 +1469,13 @@ fn run_gia_diff(
     };
 
     // Snapshot diff: diff(base, sha2)
-    let diff_out = match std::process::Command::new("git")
-        .args(["-C", repo_path, "diff", &base, sha2])
-        .output()
-    {
+    let mut diff_cmd = std::process::Command::new("git");
+    diff_cmd.args(["-C", repo_path, "diff", &base, sha2]);
+    if !pathspecs.is_empty() {
+        diff_cmd.arg("--");
+        diff_cmd.args(pathspecs);
+    }
+    let diff_out = match diff_cmd.output() {
         Ok(out) => out,
         Err(e) => return format!("Error running git diff: {e}"),
     };

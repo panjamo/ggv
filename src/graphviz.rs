@@ -278,7 +278,7 @@ window.addEventListener('load', function() {
         t.addEventListener('click', function(e) {
           e.stopPropagation();
           e.preventDefault();
-          window.open(wsUrl + '/diff2html?from=' + fromSha + '&to=' + toSha, '_blank');
+          window.open(wsUrl + '/diff2html?from=' + fromSha + '&to=' + toSha + ggvFilterParam(), '_blank');
         });
       });
     });
@@ -304,6 +304,10 @@ window.addEventListener('load', function() {
       var d = document.createElement('div');
       d.style.cssText = 'border-top:1px solid #2d3748;margin:4px 0;';
       return d;
+    }
+    function ggvFilterParam() {
+      var f = (typeof localStorage !== 'undefined') ? localStorage.getItem('ggv-diff-filter') || '' : '';
+      return f ? '&filter=' + encodeURIComponent(f) : '';
     }
     // Parse structured node id: sha~L~local1,local2~R~remote1,remote2~T~tag1,tag2
     // ~ is forbidden in git ref names so it is an unambiguous separator.
@@ -384,7 +388,7 @@ window.addEventListener('load', function() {
           ctxMenu.appendChild(makeDivider());
           ctxMenu.appendChild(makeMenuItem('View HTML Diff (diff2html) \u2013 ' + range, function() {
             setSecondHL(g);
-            window.open(wsUrl + '/diff2html?from=' + fromSha2 + '&to=' + toSha2, '_blank');
+            window.open(wsUrl + '/diff2html?from=' + fromSha2 + '&to=' + toSha2 + ggvFilterParam(), '_blank');
           }));
           ctxMenu.appendChild(makeMenuItem('Open in Diff Tool \u2013 ' + range, function() {
             setSecondHL(g);
@@ -400,15 +404,15 @@ window.addEventListener('load', function() {
           ctxMenu.appendChild(makeDivider());
           ctxMenu.appendChild(makeMenuItem('AI: Summarize Changes \u2013 ' + range, function() {
             setSecondHL(g);
-            window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2 + '&ai=1', '_blank');
+            window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2 + '&ai=1' + ggvFilterParam(), '_blank');
           }));
           ctxMenu.appendChild(makeMenuItem('AI: Summarize Diff Only \u2013 ' + range, function() {
             setSecondHL(g);
-            window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2 + '&ai=1&nolog=1', '_blank');
+            window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2 + '&ai=1&nolog=1' + ggvFilterParam(), '_blank');
           }));
           ctxMenu.appendChild(makeMenuItem('AI: Summarize Commits \u2013 ' + range, function() {
             setSecondHL(g);
-            window.open(wsUrl + '/log-summary?from=' + fromSha2 + '&to=' + toSha2, '_blank');
+            window.open(wsUrl + '/log-summary?from=' + fromSha2 + '&to=' + toSha2 + ggvFilterParam(), '_blank');
           }));
           ctxMenu.appendChild(makeDivider());
           ctxMenu.appendChild(makeMenuItem('Show Commit History \u2013 ' + range, function() {
@@ -477,17 +481,17 @@ window.addEventListener('load', function() {
         ctxMenu.appendChild(makeDivider());
       }
       ctxMenu.appendChild(makeMenuItem('View HTML Diff (diff2html)', function() {
-        window.open(wsUrl + '/diff2html?from=' + fromSha + '&to=' + toSha, '_blank');
+        window.open(wsUrl + '/diff2html?from=' + fromSha + '&to=' + toSha + ggvFilterParam(), '_blank');
       }));
       ctxMenu.appendChild(makeMenuItem('Open in Diff Tool', function() {
         window.open(wsUrl + '/diff?from=' + fromSha + '&to=' + toSha, '_blank');
       }));
       ctxMenu.appendChild(makeDivider());
       ctxMenu.appendChild(makeMenuItem('AI: Summarize Changes', function() {
-        window.open(wsUrl + '/diff?from=' + fromSha + '&to=' + toSha + '&ai=1', '_blank');
+        window.open(wsUrl + '/diff?from=' + fromSha + '&to=' + toSha + '&ai=1' + ggvFilterParam(), '_blank');
       }));
       ctxMenu.appendChild(makeMenuItem('AI: Summarize Commits', function() {
-        window.open(wsUrl + '/log-summary?from=' + fromSha + '&to=' + toSha, '_blank');
+        window.open(wsUrl + '/log-summary?from=' + fromSha + '&to=' + toSha + ggvFilterParam(), '_blank');
       }));
       ctxMenu.appendChild(makeDivider());
       ctxMenu.appendChild(makeMenuItem('Show Commit History', function() {
