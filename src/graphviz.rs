@@ -338,78 +338,83 @@ window.addEventListener('load', function() {
         ctxMenu = document.createElement('div');
         ctxMenu.style.cssText = 'position:fixed;left:' + e.clientX + 'px;top:' + e.clientY + 'px;background:#1a1f2e;border:1px solid #2d3748;border-radius:8px;padding:4px 0;z-index:9999;min-width:180px;box-shadow:0 8px 24px rgba(0,0,0,0.6);font-family:"Segoe UI",sans-serif;';
         ctxMenu.addEventListener('click', function(ev) { ev.stopPropagation(); });
-        ctxMenu.appendChild(makeMenuItem(pinSha && pinSha !== sha ? 'Change first node' : 'Select as first node', function() {
+        ctxMenu.appendChild(makeMenuItem(pinSha && pinSha !== sha ? 'Change First Node' : 'Select as First Node', function() {
           clearPinHL();
           pinSha = sha;
           setPinHL(g);
         }));
         if (pinSha === sha) {
-          ctxMenu.appendChild(makeMenuItem('Clear selection', function() {
+          ctxMenu.appendChild(makeMenuItem('Clear First Node Selection', function() {
             clearPinHL();
             pinSha = null;
           }));
         }
         if (pinSha && pinSha !== sha) {
           var pinShort = pinSha.slice(0, 7);
+          var myShort = sha.slice(0, 7);
+          var range = pinShort + ' \u2194 ' + myShort;
           var myTop = g.getBoundingClientRect().top;
           var pTop = pinEl ? pinEl.getBoundingClientRect().top : 0;
           var fromSha2 = pTop > myTop ? pinSha : sha;
           var toSha2   = pTop > myTop ? sha : pinSha;
-          ctxMenu.appendChild(makeMenuItem('Compare with ' + pinShort + '\u2026', function() {
+          ctxMenu.appendChild(makeDivider());
+          ctxMenu.appendChild(makeMenuItem('Open in Diff Tool \u2013 ' + range, function() {
             window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2, '_blank');
           }));
-          ctxMenu.appendChild(makeMenuItem('Compare with AI \u2013 ' + pinShort + '\u2026', function() {
+          ctxMenu.appendChild(makeMenuItem('View HTML Diff (diff2html) \u2013 ' + range, function() {
+            window.open(wsUrl + '/diff2html?from=' + fromSha2 + '&to=' + toSha2, '_blank');
+          }));
+          ctxMenu.appendChild(makeDivider());
+          ctxMenu.appendChild(makeMenuItem('AI: Summarize Changes \u2013 ' + range, function() {
             window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2 + '&ai=1', '_blank');
           }));
-          ctxMenu.appendChild(makeMenuItem('Compare with AI diff \u2013 ' + pinShort + '\u2026', function() {
+          ctxMenu.appendChild(makeMenuItem('AI: Summarize Diff Only \u2013 ' + range, function() {
             window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2 + '&ai=1&nolog=1', '_blank');
           }));
-          ctxMenu.appendChild(makeMenuItem('Compare with AI log \u2013 ' + pinShort + '\u2026', function() {
+          ctxMenu.appendChild(makeMenuItem('AI: Summarize Commits \u2013 ' + range, function() {
             window.open(wsUrl + '/log-summary?from=' + fromSha2 + '&to=' + toSha2, '_blank');
           }));
-          ctxMenu.appendChild(makeMenuItem('Show Git Log \u2013 ' + pinShort + '\u2026', function() {
+          ctxMenu.appendChild(makeDivider());
+          ctxMenu.appendChild(makeMenuItem('Show Commit History \u2013 ' + range, function() {
             window.open(wsUrl + '/log?from=' + fromSha2 + '&to=' + toSha2, '_blank');
-          }));
-          ctxMenu.appendChild(makeMenuItem('diff2html \u2013 ' + pinShort + '\u2026', function() {
-            window.open(wsUrl + '/diff2html?from=' + fromSha2 + '&to=' + toSha2, '_blank');
           }));
         }
         ctxMenu.appendChild(makeDivider());
-        ctxMenu.appendChild(makeMenuItem('Copy SHA', function() {
+        ctxMenu.appendChild(makeMenuItem('Copy Commit SHA', function() {
           navigator.clipboard.writeText(sha);
         }));
         refs.local.forEach(function(name) {
-          ctxMenu.appendChild(makeMenuItem('Copy branch: ' + name, function() {
+          ctxMenu.appendChild(makeMenuItem('Copy Branch Name: ' + name, function() {
             navigator.clipboard.writeText(name);
           }));
         });
         refs.remote.forEach(function(name) {
-          ctxMenu.appendChild(makeMenuItem('Copy branch: ' + name, function() {
+          ctxMenu.appendChild(makeMenuItem('Copy Branch Name: ' + name, function() {
             navigator.clipboard.writeText(name);
           }));
         });
         refs.tags.forEach(function(name) {
-          ctxMenu.appendChild(makeMenuItem('Copy tag: ' + name, function() {
+          ctxMenu.appendChild(makeMenuItem('Copy Tag Name: ' + name, function() {
             navigator.clipboard.writeText(name);
           }));
         });
         if (refs.local.length > 0 || refs.remote.length > 0) {
           ctxMenu.appendChild(makeDivider());
           refs.local.forEach(function(name) {
-            ctxMenu.appendChild(makeMenuItem('Delete local: ' + name, function() {
+            ctxMenu.appendChild(makeMenuItem('Delete Local Branch: ' + name, function() {
               if (!confirm('Force-delete local branch "' + name + '"?')) return;
               fetch(wsUrl + '/delete-branch?name=' + encodeURIComponent(name) + '&scope=local');
             }));
           });
           refs.remote.forEach(function(name) {
-            ctxMenu.appendChild(makeMenuItem('Delete remote: ' + name, function() {
+            ctxMenu.appendChild(makeMenuItem('Delete Remote Branch: ' + name, function() {
               if (!confirm('Delete remote branch "' + name + '"?')) return;
               fetch(wsUrl + '/delete-branch?name=' + encodeURIComponent(name) + '&scope=remote');
             }));
           });
         }
         ctxMenu.appendChild(makeDivider());
-        ctxMenu.appendChild(makeMenuItem('Checkout branch', function() {
+        ctxMenu.appendChild(makeMenuItem('Checkout This Commit', function() {
           fetch(wsUrl + '/checkout?sha=' + sha);
         }));
         document.body.appendChild(ctxMenu);
@@ -431,16 +436,18 @@ window.addEventListener('load', function() {
           ctxMenu = document.createElement('div');
           ctxMenu.style.cssText = 'position:fixed;left:' + e.clientX + 'px;top:' + e.clientY + 'px;background:#1a1f2e;border:1px solid #2d3748;border-radius:8px;padding:4px 0;z-index:9999;min-width:200px;box-shadow:0 8px 24px rgba(0,0,0,0.6);font-family:"Segoe UI",sans-serif;';
           ctxMenu.addEventListener('click', function(ev) { ev.stopPropagation(); });
-          ctxMenu.appendChild(makeMenuItem('diff2html', function() {
+          ctxMenu.appendChild(makeMenuItem('View HTML Diff (diff2html)', function() {
             window.open(wsUrl + '/diff2html?from=' + fromSha + '&to=' + toSha, '_blank');
           }));
-          ctxMenu.appendChild(makeMenuItem('AI Summary of Changes', function() {
+          ctxMenu.appendChild(makeDivider());
+          ctxMenu.appendChild(makeMenuItem('AI: Summarize Changes', function() {
             window.open(wsUrl + '/diff?from=' + fromSha + '&to=' + toSha + '&ai=1', '_blank');
           }));
-          ctxMenu.appendChild(makeMenuItem('AI Summary (log only)', function() {
+          ctxMenu.appendChild(makeMenuItem('AI: Summarize Commits', function() {
             window.open(wsUrl + '/log-summary?from=' + fromSha + '&to=' + toSha, '_blank');
           }));
-          ctxMenu.appendChild(makeMenuItem('Show Git Log', function() {
+          ctxMenu.appendChild(makeDivider());
+          ctxMenu.appendChild(makeMenuItem('Show Commit History', function() {
             window.open(wsUrl + '/log?from=' + fromSha + '&to=' + toSha, '_blank');
           }));
           document.body.appendChild(ctxMenu);
