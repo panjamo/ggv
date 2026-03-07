@@ -130,7 +130,8 @@ impl GitGraphviz {
             let id_str = oid.to_string();
             let short_id = format!("{:.7}", id_str);
             let message = commit.summary().unwrap_or("").to_string();
-            let author = commit.author().name().unwrap_or("").to_string();
+            // Skip author to avoid potential UTF-8 panics
+            let author = String::new();
             let when = time_ago(commit.time().seconds());
             result.push((short_id, message, author, when));
             if result.len() >= max {
@@ -172,7 +173,14 @@ impl GitGraphviz {
             let branches = self.repo.branches(Some(BranchType::Local))?;
             for branch_result in branches {
                 let (branch, _) = branch_result?;
-                let branch_name = branch.name()?.unwrap_or("unknown").to_string();
+                let branch_name = match branch.name() {
+                    Ok(Some(name)) => name.to_string(),
+                    Ok(None) => "unknown".to_string(),
+                    Err(_) => {
+                        // Skip branches with non-UTF-8 names
+                        continue;
+                    }
+                };
                 let ref_name = format!("refs/heads/{}", branch_name);
 
                 if let Some(oid) = branch.get().target() {
@@ -192,7 +200,14 @@ impl GitGraphviz {
             let remote_branches = self.repo.branches(Some(BranchType::Remote))?;
             for branch_result in remote_branches {
                 let (branch, _) = branch_result?;
-                let branch_name = branch.name()?.unwrap_or("unknown").to_string();
+                let branch_name = match branch.name() {
+                    Ok(Some(name)) => name.to_string(),
+                    Ok(None) => "unknown".to_string(),
+                    Err(_) => {
+                        // Skip branches with non-UTF-8 names
+                        continue;
+                    }
+                };
                 let ref_name = format!("refs/remotes/{}", branch_name);
 
                 if let Some(oid) = branch.get().target() {
@@ -351,7 +366,7 @@ impl GitGraphviz {
                 });
                 let path_commits = self.collect_path_commits(&commit.id, Some(pid.as_str()), 20);
                 let tooltip = build_tooltip(&path_commits);
-                let count = count_path_commits(&self.repo, &commit.id, Some(pid.as_str()));
+                let count = count_path_commits(&self.repo, &commit.id, Some(pid));
                 let files = diff_file_list(&self.repo, pid, &commit.id);
                 edge_attrs.insert(
                     (pid.clone(), commit.id.clone()),
@@ -736,11 +751,9 @@ fn build_graph_tooltip(repo: &Repository) -> String {
             if let Ok(commit) = repo.find_commit(oid) {
                 let short_id = oid.to_string()[..7].to_string();
                 let msg = commit.summary().unwrap_or("").trim().to_string();
-                let author = commit.author();
-                let author_name = author.name().unwrap_or("unknown");
                 let when = time_ago(commit.time().seconds());
                 lines.push(format!("Commit:  {} {}", short_id, msg));
-                lines.push(format!("Author:  {}", author_name));
+                // Skip author display to avoid potential UTF-8 panics from git2
                 lines.push(format!("Date:    {}", when));
             }
         }
@@ -788,15 +801,14 @@ fn diff_file_list(repo: &Repository, from_sha: &str, to_sha: &str) -> Option<Str
     let diff = repo
         .diff_tree_to_tree(Some(&from_tree), Some(&to_tree), None)
         .ok()?;
-    let mut files: Vec<String> = diff
-        .deltas()
-        .filter_map(|d| {
-            d.new_file()
-                .path()
-                .and_then(|p| p.to_str())
-                .map(str::to_string)
-        })
-        .collect();
+    let mut files: Vec<String> = Vec::new();
+    for d in diff.deltas() {
+        // Use path_bytes to avoid UTF-8 panic from git2 internals
+        if let Some(path_bytes) = d.new_file().path_bytes() {
+            let path_str = String::from_utf8_lossy(path_bytes);
+            files.push(path_str.to_string());
+        }
+    }
     const MAX: usize = 30;
     let total = files.len();
     if total == 0 {

@@ -776,9 +776,13 @@ fn run_diff2html(repo_path: &str, sha1: &str, sha2: &str, theme: Theme) -> Resul
     let exclude_base = format!("^{older}");
     let log_text = std::process::Command::new("git")
         .args([
-            "-C", repo_path, "log",
+            "-C",
+            repo_path,
+            "log",
             "--pretty=format:### %h, %an, %ar, %D%n%n%s%n%b%n",
-            &exclude_base, sha1, sha2,
+            &exclude_base,
+            sha1,
+            sha2,
         ])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
@@ -797,21 +801,38 @@ fn run_diff2html(repo_path: &str, sha1: &str, sha2: &str, theme: Theme) -> Resul
     let diff_json = to_json_string(&raw_diff);
 
     // Theme palette for the commit history section
-    let (bg, card_bg, card_border, card_hover, text, sub, dim, h1_col,
-         sha_bg, sha_fg, hash_bg, hash_fg,
-         rh_bg, rh_fg, rb_bg, rb_fg, rr_bg, rr_fg, rt_bg, rt_fg,
-         section_border) = match theme {
+    let (
+        bg,
+        card_bg,
+        card_border,
+        card_hover,
+        text,
+        sub,
+        dim,
+        h1_col,
+        sha_bg,
+        sha_fg,
+        hash_bg,
+        hash_fg,
+        rh_bg,
+        rh_fg,
+        rb_bg,
+        rb_fg,
+        rr_bg,
+        rr_fg,
+        rt_bg,
+        rt_fg,
+        section_border,
+    ) = match theme {
         Theme::Dark => (
             "#0f1117", "#1a1f2e", "#2d3748", "#4a5568", "#e2e8f0", "#718096", "#4a5568", "#63b3ed",
-            "#2d3748", "#a0aec0", "#1e3a5f", "#63b3ed",
-            "#744210", "#fbd38d", "#1e3a5f", "#63b3ed", "#1c4532", "#68d391", "#521b41", "#fbb6ce",
-            "#2d3748",
+            "#2d3748", "#a0aec0", "#1e3a5f", "#63b3ed", "#744210", "#fbd38d", "#1e3a5f", "#63b3ed",
+            "#1c4532", "#68d391", "#521b41", "#fbb6ce", "#2d3748",
         ),
         Theme::Light => (
             "#f8fafc", "#ffffff", "#e2e8f0", "#cbd5e1", "#1e293b", "#475569", "#94a3b8", "#2563eb",
-            "#f1f5f9", "#64748b", "#eff6ff", "#1d4ed8",
-            "#fef3c7", "#92400e", "#eff6ff", "#1e40af", "#ecfdf5", "#065f46", "#fdf4ff", "#7e22ce",
-            "#e2e8f0",
+            "#f1f5f9", "#64748b", "#eff6ff", "#1d4ed8", "#fef3c7", "#92400e", "#eff6ff", "#1e40af",
+            "#ecfdf5", "#065f46", "#fdf4ff", "#7e22ce", "#e2e8f0",
         ),
     };
 
@@ -1384,9 +1405,7 @@ fn render_ref_badge(r: &str) -> String {
     }
     if r.starts_with("HEAD -> ") {
         let branch = html_escape(&r["HEAD -> ".len()..]);
-        format!(
-            r#"<span class="ref-head">HEAD</span><span class="ref-branch">{branch}</span>"#
-        )
+        format!(r#"<span class="ref-head">HEAD</span><span class="ref-branch">{branch}</span>"#)
     } else if r.starts_with("tag: ") {
         let tag = html_escape(&r["tag: ".len()..]);
         format!(r#"<span class="ref-tag">{tag}</span>"#)
@@ -1444,7 +1463,11 @@ fn render_commit_cards(log_text: &str) -> (String, usize) {
                 body_lines.push(line);
             }
         }
-        while body_lines.last().map(|l: &&str| l.trim().is_empty()).unwrap_or(false) {
+        while body_lines
+            .last()
+            .map(|l: &&str| l.trim().is_empty())
+            .unwrap_or(false)
+        {
             body_lines.pop();
         }
 
@@ -1504,18 +1527,37 @@ fn build_log_html(sha1: &str, sha2: &str, log_text: &str, theme: Theme) -> Strin
     //            sha_bg, sha_fg, hash_bg, hash_fg,
     //            ref_head_bg, ref_head_fg, ref_branch_bg, ref_branch_fg,
     //            ref_remote_bg, ref_remote_fg, ref_tag_bg, ref_tag_fg)
-    let (bg, card_bg, card_border, card_hover, text, sub, dim, h1_col,
-         sha_bg, sha_fg, hash_bg, hash_fg,
-         rh_bg, rh_fg, rb_bg, rb_fg, rr_bg, rr_fg, rt_bg, rt_fg) = match theme {
+    let (
+        bg,
+        card_bg,
+        card_border,
+        card_hover,
+        text,
+        sub,
+        dim,
+        h1_col,
+        sha_bg,
+        sha_fg,
+        hash_bg,
+        hash_fg,
+        rh_bg,
+        rh_fg,
+        rb_bg,
+        rb_fg,
+        rr_bg,
+        rr_fg,
+        rt_bg,
+        rt_fg,
+    ) = match theme {
         Theme::Dark => (
             "#0f1117", "#1a1f2e", "#2d3748", "#4a5568", "#e2e8f0", "#718096", "#4a5568", "#63b3ed",
-            "#2d3748", "#a0aec0", "#1e3a5f", "#63b3ed",
-            "#744210", "#fbd38d", "#1e3a5f", "#63b3ed", "#1c4532", "#68d391", "#521b41", "#fbb6ce",
+            "#2d3748", "#a0aec0", "#1e3a5f", "#63b3ed", "#744210", "#fbd38d", "#1e3a5f", "#63b3ed",
+            "#1c4532", "#68d391", "#521b41", "#fbb6ce",
         ),
         Theme::Light => (
             "#f8fafc", "#ffffff", "#e2e8f0", "#cbd5e1", "#1e293b", "#475569", "#94a3b8", "#2563eb",
-            "#f1f5f9", "#64748b", "#eff6ff", "#1d4ed8",
-            "#fef3c7", "#92400e", "#eff6ff", "#1e40af", "#ecfdf5", "#065f46", "#fdf4ff", "#7e22ce",
+            "#f1f5f9", "#64748b", "#eff6ff", "#1d4ed8", "#fef3c7", "#92400e", "#eff6ff", "#1e40af",
+            "#ecfdf5", "#065f46", "#fdf4ff", "#7e22ce",
         ),
     };
 
@@ -1616,12 +1658,12 @@ fn build_html(sha1: &str, sha2: &str, summary: &str, theme: Theme) -> String {
     let summary_escaped = html_escape(summary);
     let (bg, card_bg, card_border, text, sub, dim, h1_col, sha_bg, sha_fg) = match theme {
         Theme::Dark => (
-            "#0f1117", "#1a1f2e", "#2d3748", "#e2e8f0", "#718096", "#4a5568",
-            "#63b3ed", "#2d3748", "#a0aec0",
+            "#0f1117", "#1a1f2e", "#2d3748", "#e2e8f0", "#718096", "#4a5568", "#63b3ed", "#2d3748",
+            "#a0aec0",
         ),
         Theme::Light => (
-            "#f8fafc", "#ffffff", "#e2e8f0", "#1e293b", "#475569", "#94a3b8",
-            "#2563eb", "#f1f5f9", "#64748b",
+            "#f8fafc", "#ffffff", "#e2e8f0", "#1e293b", "#475569", "#94a3b8", "#2563eb", "#f1f5f9",
+            "#64748b",
         ),
     };
     format!(
