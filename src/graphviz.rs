@@ -370,6 +370,9 @@ window.addEventListener('load', function() {
           ctxMenu.appendChild(makeMenuItem('Show Git Log \u2013 ' + pinShort + '\u2026', function() {
             window.open(wsUrl + '/log?from=' + fromSha2 + '&to=' + toSha2, '_blank');
           }));
+          ctxMenu.appendChild(makeMenuItem('diff2html \u2013 ' + pinShort + '\u2026', function() {
+            window.open(wsUrl + '/diff2html?from=' + fromSha2 + '&to=' + toSha2, '_blank');
+          }));
         }
         ctxMenu.appendChild(makeDivider());
         ctxMenu.appendChild(makeMenuItem('Copy SHA', function() {
@@ -428,6 +431,9 @@ window.addEventListener('load', function() {
           ctxMenu = document.createElement('div');
           ctxMenu.style.cssText = 'position:fixed;left:' + e.clientX + 'px;top:' + e.clientY + 'px;background:#1a1f2e;border:1px solid #2d3748;border-radius:8px;padding:4px 0;z-index:9999;min-width:200px;box-shadow:0 8px 24px rgba(0,0,0,0.6);font-family:"Segoe UI",sans-serif;';
           ctxMenu.addEventListener('click', function(ev) { ev.stopPropagation(); });
+          ctxMenu.appendChild(makeMenuItem('diff2html', function() {
+            window.open(wsUrl + '/diff2html?from=' + fromSha + '&to=' + toSha, '_blank');
+          }));
           ctxMenu.appendChild(makeMenuItem('AI Summary of Changes', function() {
             window.open(wsUrl + '/diff?from=' + fromSha + '&to=' + toSha + '&ai=1', '_blank');
           }));

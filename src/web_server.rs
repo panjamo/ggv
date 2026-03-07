@@ -311,7 +311,11 @@ fn handle_connection(
             }
             let base_prompt = prompt.as_deref().unwrap_or(DEFAULT_DIFF_PROMPT).to_string();
             let effective_prompt = with_lang(&base_prompt, lang);
-            let effective_prompt = if gia_audio { with_audio(&effective_prompt) } else { effective_prompt };
+            let effective_prompt = if gia_audio {
+                with_audio(&effective_prompt)
+            } else {
+                effective_prompt
+            };
             if gia_browser {
                 run_gia_browser(repo_path, &sha1, &sha2, Some(&effective_prompt), gia_audio);
                 send_response(
@@ -364,7 +368,11 @@ fn handle_connection(
             }
             let base_prompt = prompt.as_deref().unwrap_or(DEFAULT_LOG_PROMPT).to_string();
             let effective_prompt = with_lang(&base_prompt, lang);
-            let effective_prompt = if gia_audio { with_audio(&effective_prompt) } else { effective_prompt };
+            let effective_prompt = if gia_audio {
+                with_audio(&effective_prompt)
+            } else {
+                effective_prompt
+            };
             if gia_browser {
                 run_gia_log_browser(repo_path, &sha1, &sha2, Some(&effective_prompt), gia_audio);
                 send_response(
@@ -374,7 +382,8 @@ fn handle_connection(
                     HTML_CLOSE_WINDOW,
                 );
             } else {
-                let summary = run_gia_log(repo_path, &sha1, &sha2, Some(&effective_prompt), gia_audio);
+                let summary =
+                    run_gia_log(repo_path, &sha1, &sha2, Some(&effective_prompt), gia_audio);
                 let html = build_html(
                     &sha1[..sha1.len().min(7)],
                     &sha2[..sha2.len().min(7)],
@@ -410,6 +419,36 @@ fn handle_connection(
             }
             let html = serve_git_log(repo_path, &sha1, &sha2);
             send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
+        }
+        "/diff2html" => {
+            let params = parse_query(query);
+            let sha1 = match params.get("from") {
+                Some(s) if is_valid_sha(s) => s.clone(),
+                _ => {
+                    send_response(&mut stream, 400, "text/plain", "Invalid or missing 'from'");
+                    return;
+                }
+            };
+            let sha2 = match params.get("to") {
+                Some(s) if is_valid_sha(s) => s.clone(),
+                _ => {
+                    send_response(&mut stream, 400, "text/plain", "Invalid or missing 'to'");
+                    return;
+                }
+            };
+            if !has_git_diff(repo_path, &sha1, &sha2) {
+                send_response(
+                    &mut stream,
+                    200,
+                    "text/html; charset=utf-8",
+                    &build_no_diff_html(&sha1, &sha2),
+                );
+                return;
+            }
+            match run_diff2html(repo_path, &sha1, &sha2) {
+                Ok(html) => send_response(&mut stream, 200, "text/html; charset=utf-8", &html),
+                Err(e) => send_response(&mut stream, 500, "text/plain", &e),
+            }
         }
         _ => {
             send_response(&mut stream, 404, "text/plain", "Not Found");
@@ -657,6 +696,123 @@ fn run_git_difftool(repo_path: &str, sha1: &str, sha2: &str) {
         .spawn();
 }
 
+const DIFF2HTML_JS: &str = include_str!("../assets/diff2html.min.js");
+const DIFF2HTML_CSS: &str = include_str!("../assets/diff2html.min.css");
+
+/// Encode an arbitrary string as a JSON string literal (including surrounding quotes).
+/// Also escapes `</` as `<\/` so that `</script>` inside the value cannot terminate
+/// an enclosing HTML `<script>` tag.
+fn to_json_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '<' => {
+                // Escape </ to prevent </script> from closing the enclosing script tag
+                if chars.peek() == Some(&'/') {
+                    out.push_str("<\\/");
+                    chars.next();
+                } else {
+                    out.push('<');
+                }
+            }
+            c if (c as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn run_diff2html(repo_path: &str, sha1: &str, sha2: &str) -> Result<String, String> {
+    // Determine chronological order so we always diff older → newer
+    let sha1_is_ancestor = std::process::Command::new("git")
+        .args(["-C", repo_path, "merge-base", "--is-ancestor", sha1, sha2])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    let (older, newer) = if sha1_is_ancestor {
+        (sha1, sha2)
+    } else {
+        (sha2, sha1)
+    };
+
+    let diff_bytes = std::process::Command::new("git")
+        .args(["-C", repo_path, "diff", older, newer])
+        .output()
+        .map_err(|e| format!("git diff failed: {e}"))?
+        .stdout;
+
+    let raw_diff = String::from_utf8_lossy(&diff_bytes);
+    let s1 = &sha1[..sha1.len().min(7)];
+    let s2 = &sha2[..sha2.len().min(7)];
+    let diff_json = to_json_string(&raw_diff);
+
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>diff2html: {s1}..{s2}</title>
+<style>
+{css}
+body {{ margin: 0; padding: 16px; }}
+h2 {{ margin: 0 0 14px; font-size: 13px; font-weight: 400; color: #555; }}
+.d2h-file-header {{ cursor: pointer; user-select: none; }}
+.d2h-file-header:hover {{ background: #e8eaed; }}
+.ggv-toggle {{ float: right; font-size: 11px; color: #888; margin-left: 8px; transition: transform 0.15s; display: inline-block; }}
+.ggv-collapsed .ggv-toggle {{ transform: rotate(-90deg); }}
+.ggv-file-body {{ overflow: hidden; }}
+.ggv-file-body.ggv-collapsed {{ display: none; }}
+</style>
+</head>
+<body>
+<h2>{s1} &rarr; {s2}</h2>
+<div id="diff"></div>
+<script>{js}</script>
+<script>
+document.getElementById('diff').innerHTML =
+  Diff2Html.html({diff_json}, {{
+    drawFileList: true,
+    matching: 'lines',
+    outputFormat: 'side-by-side'
+  }});
+// Add collapse toggle to each file header
+document.querySelectorAll('.d2h-file-wrapper').forEach(function(wrapper) {{
+  var header = wrapper.querySelector('.d2h-file-header');
+  var body = header && header.nextElementSibling;
+  if (!header || !body) return;
+  body.classList.add('ggv-file-body');
+  var arrow = document.createElement('span');
+  arrow.className = 'ggv-toggle';
+  arrow.textContent = '\u25bc'; // ▼
+  header.appendChild(arrow);
+  header.addEventListener('click', function() {{
+    var collapsed = body.classList.toggle('ggv-collapsed');
+    header.classList.toggle('ggv-collapsed', collapsed);
+  }});
+}});
+</script>
+</body>
+</html>"#,
+        css = DIFF2HTML_CSS,
+        js = DIFF2HTML_JS,
+        s1 = s1,
+        s2 = s2,
+        diff_json = diff_json,
+    );
+
+    Ok(html)
+}
+
 fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>, gia_audio: bool) {
     let base = match resolve_diff_base(repo_path, sha1, sha2) {
         Ok(b) => b,
@@ -861,7 +1017,13 @@ fn run_gia_diff(
     result
 }
 
-fn run_gia_log(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>, gia_audio: bool) -> String {
+fn run_gia_log(
+    repo_path: &str,
+    sha1: &str,
+    sha2: &str,
+    prompt: Option<&str>,
+    gia_audio: bool,
+) -> String {
     let base = match resolve_diff_base(repo_path, sha1, sha2) {
         Ok(b) => b,
         Err(e) => return format!("Error resolving log base: {e}"),
@@ -926,7 +1088,13 @@ fn run_gia_log(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>, gi
     result
 }
 
-fn run_gia_log_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>, gia_audio: bool) {
+fn run_gia_log_browser(
+    repo_path: &str,
+    sha1: &str,
+    sha2: &str,
+    prompt: Option<&str>,
+    gia_audio: bool,
+) {
     let base = match resolve_diff_base(repo_path, sha1, sha2) {
         Ok(b) => b,
         Err(e) => {
