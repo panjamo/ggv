@@ -380,13 +380,13 @@ window.addEventListener('load', function() {
           var fromSha2 = pTop > myTop ? pinSha : sha;
           var toSha2   = pTop > myTop ? sha : pinSha;
           ctxMenu.appendChild(makeDivider());
-          ctxMenu.appendChild(makeMenuItem('Open in Diff Tool \u2013 ' + range, function() {
-            setSecondHL(g);
-            window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2, '_blank');
-          }));
           ctxMenu.appendChild(makeMenuItem('View HTML Diff (diff2html) \u2013 ' + range, function() {
             setSecondHL(g);
             window.open(wsUrl + '/diff2html?from=' + fromSha2 + '&to=' + toSha2, '_blank');
+          }));
+          ctxMenu.appendChild(makeMenuItem('Open in Diff Tool \u2013 ' + range, function() {
+            setSecondHL(g);
+            window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2, '_blank');
           }));
           if (forgeUrl) {
             var fSeg = forgeUrl.indexOf('github.com') >= 0 ? '/compare/' : '/-/compare/';
@@ -468,11 +468,11 @@ window.addEventListener('load', function() {
         }));
         ctxMenu.appendChild(makeDivider());
       }
-      ctxMenu.appendChild(makeMenuItem('Open in Diff Tool', function() {
-        window.open(wsUrl + '/diff?from=' + fromSha + '&to=' + toSha, '_blank');
-      }));
       ctxMenu.appendChild(makeMenuItem('View HTML Diff (diff2html)', function() {
         window.open(wsUrl + '/diff2html?from=' + fromSha + '&to=' + toSha, '_blank');
+      }));
+      ctxMenu.appendChild(makeMenuItem('Open in Diff Tool', function() {
+        window.open(wsUrl + '/diff?from=' + fromSha + '&to=' + toSha, '_blank');
       }));
       ctxMenu.appendChild(makeDivider());
       ctxMenu.appendChild(makeMenuItem('AI: Summarize Changes', function() {
