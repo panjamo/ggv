@@ -326,6 +326,23 @@ window.addEventListener('load', function() {
       });
       pinEl = null; pinStrokes = [];
     }
+    var secondEl = null;
+    var secondStrokes = [];
+    function setSecondHL(g) {
+      clearSecondHL();
+      secondEl = g;
+      g.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s) {
+        secondStrokes.push(s.getAttribute('stroke') || '');
+        s.setAttribute('stroke', '#34d399');
+      });
+    }
+    function clearSecondHL() {
+      if (!secondEl) return;
+      secondEl.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s, i) {
+        if (secondStrokes[i] !== undefined) s.setAttribute('stroke', secondStrokes[i]);
+      });
+      secondEl = null; secondStrokes = [];
+    }
     document.querySelectorAll('g.node').forEach(function(g) {
       g.addEventListener('contextmenu', function(e) {
         e.preventDefault();
@@ -346,6 +363,7 @@ window.addEventListener('load', function() {
         if (pinSha === sha) {
           ctxMenu.appendChild(makeMenuItem('Clear First Node Selection', function() {
             clearPinHL();
+            clearSecondHL();
             pinSha = null;
           }));
         }
@@ -359,23 +377,36 @@ window.addEventListener('load', function() {
           var toSha2   = pTop > myTop ? sha : pinSha;
           ctxMenu.appendChild(makeDivider());
           ctxMenu.appendChild(makeMenuItem('Open in Diff Tool \u2013 ' + range, function() {
+            setSecondHL(g);
             window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2, '_blank');
           }));
           ctxMenu.appendChild(makeMenuItem('View HTML Diff (diff2html) \u2013 ' + range, function() {
+            setSecondHL(g);
             window.open(wsUrl + '/diff2html?from=' + fromSha2 + '&to=' + toSha2, '_blank');
           }));
+          if (forgeUrl) {
+            var fSeg = forgeUrl.indexOf('github.com') >= 0 ? '/compare/' : '/-/compare/';
+            ctxMenu.appendChild(makeMenuItem('Open Compare on GitLab \u2044 GitHub \u2013 ' + range, function() {
+              setSecondHL(g);
+              window.open(forgeUrl + fSeg + fromSha2 + '...' + toSha2, '_blank');
+            }));
+          }
           ctxMenu.appendChild(makeDivider());
           ctxMenu.appendChild(makeMenuItem('AI: Summarize Changes \u2013 ' + range, function() {
+            setSecondHL(g);
             window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2 + '&ai=1', '_blank');
           }));
           ctxMenu.appendChild(makeMenuItem('AI: Summarize Diff Only \u2013 ' + range, function() {
+            setSecondHL(g);
             window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2 + '&ai=1&nolog=1', '_blank');
           }));
           ctxMenu.appendChild(makeMenuItem('AI: Summarize Commits \u2013 ' + range, function() {
+            setSecondHL(g);
             window.open(wsUrl + '/log-summary?from=' + fromSha2 + '&to=' + toSha2, '_blank');
           }));
           ctxMenu.appendChild(makeDivider());
           ctxMenu.appendChild(makeMenuItem('Show Commit History \u2013 ' + range, function() {
+            setSecondHL(g);
             window.open(wsUrl + '/log?from=' + fromSha2 + '&to=' + toSha2, '_blank');
           }));
         }
@@ -420,37 +451,58 @@ window.addEventListener('load', function() {
         document.body.appendChild(ctxMenu);
       });
     });
-    // Right-click context menu on edge count labels
+    // Shared helper: build and show the edge context menu
+    function showEdgeMenu(fromSha, toSha, x, y) {
+      removeCtxMenu();
+      ctxMenu = document.createElement('div');
+      ctxMenu.style.cssText = 'position:fixed;left:' + x + 'px;top:' + y + 'px;background:#1a1f2e;border:1px solid #2d3748;border-radius:8px;padding:4px 0;z-index:9999;min-width:200px;box-shadow:0 8px 24px rgba(0,0,0,0.6);font-family:"Segoe UI",sans-serif;';
+      ctxMenu.addEventListener('click', function(ev) { ev.stopPropagation(); });
+      if (forgeUrl) {
+        var fSeg = forgeUrl.indexOf('github.com') >= 0 ? '/compare/' : '/-/compare/';
+        ctxMenu.appendChild(makeMenuItem('Open Compare on GitLab \u2044 GitHub', function() {
+          window.open(forgeUrl + fSeg + fromSha + '...' + toSha, '_blank');
+        }));
+        ctxMenu.appendChild(makeDivider());
+      }
+      ctxMenu.appendChild(makeMenuItem('Open in Diff Tool', function() {
+        window.open(wsUrl + '/diff?from=' + fromSha + '&to=' + toSha, '_blank');
+      }));
+      ctxMenu.appendChild(makeMenuItem('View HTML Diff (diff2html)', function() {
+        window.open(wsUrl + '/diff2html?from=' + fromSha + '&to=' + toSha, '_blank');
+      }));
+      ctxMenu.appendChild(makeDivider());
+      ctxMenu.appendChild(makeMenuItem('AI: Summarize Changes', function() {
+        window.open(wsUrl + '/diff?from=' + fromSha + '&to=' + toSha + '&ai=1', '_blank');
+      }));
+      ctxMenu.appendChild(makeMenuItem('AI: Summarize Commits', function() {
+        window.open(wsUrl + '/log-summary?from=' + fromSha + '&to=' + toSha, '_blank');
+      }));
+      ctxMenu.appendChild(makeDivider());
+      ctxMenu.appendChild(makeMenuItem('Show Commit History', function() {
+        window.open(wsUrl + '/log?from=' + fromSha + '&to=' + toSha, '_blank');
+      }));
+      document.body.appendChild(ctxMenu);
+    }
+    // Right-click context menu on edges (arrow line) and edge count labels
     document.querySelectorAll('g.edge').forEach(function(g) {
       var title = g.querySelector('title');
       if (!title) return;
       var m = title.textContent.match(/^([0-9a-f]{40})->([0-9a-f]{40})$/);
       if (!m) return;
       var fromSha = m[1], toSha = m[2];
+      // Right-click on the edge line/arrow
+      g.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        showEdgeMenu(fromSha, toSha, e.clientX, e.clientY);
+      });
+      // Right-click on the count label (stopPropagation prevents double-fire)
       g.querySelectorAll('text').forEach(function(t) {
         if (!t.getAttribute('data-ggv-count')) return;
         t.addEventListener('contextmenu', function(e) {
           e.preventDefault();
           e.stopPropagation();
-          removeCtxMenu();
-          ctxMenu = document.createElement('div');
-          ctxMenu.style.cssText = 'position:fixed;left:' + e.clientX + 'px;top:' + e.clientY + 'px;background:#1a1f2e;border:1px solid #2d3748;border-radius:8px;padding:4px 0;z-index:9999;min-width:200px;box-shadow:0 8px 24px rgba(0,0,0,0.6);font-family:"Segoe UI",sans-serif;';
-          ctxMenu.addEventListener('click', function(ev) { ev.stopPropagation(); });
-          ctxMenu.appendChild(makeMenuItem('View HTML Diff (diff2html)', function() {
-            window.open(wsUrl + '/diff2html?from=' + fromSha + '&to=' + toSha, '_blank');
-          }));
-          ctxMenu.appendChild(makeDivider());
-          ctxMenu.appendChild(makeMenuItem('AI: Summarize Changes', function() {
-            window.open(wsUrl + '/diff?from=' + fromSha + '&to=' + toSha + '&ai=1', '_blank');
-          }));
-          ctxMenu.appendChild(makeMenuItem('AI: Summarize Commits', function() {
-            window.open(wsUrl + '/log-summary?from=' + fromSha + '&to=' + toSha, '_blank');
-          }));
-          ctxMenu.appendChild(makeDivider());
-          ctxMenu.appendChild(makeMenuItem('Show Commit History', function() {
-            window.open(wsUrl + '/log?from=' + fromSha + '&to=' + toSha, '_blank');
-          }));
-          document.body.appendChild(ctxMenu);
+          showEdgeMenu(fromSha, toSha, e.clientX, e.clientY);
         });
       });
     });
