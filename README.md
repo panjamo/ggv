@@ -21,7 +21,7 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **AI Diff Server**: Start a local web server (`-w`) that opens `git difftool` when you left-click an edge count label; right-clicking always offers AI diff options (full diff+log, diff-only, log-only)
 - **Smart AI Diff**: AI summaries use merge-base detection to produce the correct snapshot diff (`git diff`) enriched with structured commit metadata (`git log`) passed to gia as additional context; a "diff-only" variant skips the log metadata for a more focused summary
 - **Multilingual AI Output**: AI summaries are delivered in a configurable language (`-l`/`--lang`, e.g. `de-DE`, `en-US`, `fr-FR`); German is the default
-- **Rendered AI Output**: AI diff summaries are rendered as a styled HTML page in the browser — gia outputs Markdown which is converted to HTML on the fly
+- **Rendered AI Output**: AI diff summaries are rendered as a styled HTML page in the browser — gia outputs Markdown which is converted to HTML on the fly; below the summary the page shows a commit history card list and a full side-by-side diff (via diff2html, embedded inline — no CDN required), with collapsible file sections
 - **Audio Input**: Microphone recording in gia is active by default; the voice input is treated as a filter or direction — e.g. "ignore test files" or "focus only on the API changes" — and is appended to the AI prompt; pass `-N` to disable
 - **Cross-Platform**: Works on Windows, macOS, and Linux
 
