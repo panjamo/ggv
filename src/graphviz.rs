@@ -272,7 +272,7 @@ window.addEventListener('load', function() {
         t.addEventListener('click', function(e) {
           e.stopPropagation();
           e.preventDefault();
-          window.open(wsUrl + '/diff?from=' + fromSha + '&to=' + toSha, '_blank');
+          window.open(wsUrl + '/diff2html?from=' + fromSha + '&to=' + toSha, '_blank');
         });
       });
     });
