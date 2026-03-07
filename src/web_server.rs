@@ -792,7 +792,17 @@ fn diff2html_section(
         .map_err(|e| format!("git diff failed: {e}"))?
         .stdout;
 
-    let exclude_base = format!("^{older}");
+    // Use the merge base as the log exclusion anchor so that commits from both
+    // sides of a diverging branch pair are included, not just one side.
+    let merge_base = std::process::Command::new("git")
+        .args(["-C", repo_path, "merge-base", sha1, sha2])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let exclude_base = format!("^{}", merge_base.as_deref().unwrap_or(older));
     let log_text = std::process::Command::new("git")
         .args([
             "-C",
@@ -991,8 +1001,18 @@ fn run_diff2html(repo_path: &str, sha1: &str, sha2: &str, theme: Theme) -> Resul
         .map_err(|e| format!("git diff failed: {e}"))?
         .stdout;
 
-    // Fetch commit log for the history section
-    let exclude_base = format!("^{older}");
+    // Fetch commit log for the history section.
+    // Use the merge base as the exclusion anchor so commits from both sides of a
+    // diverging branch pair are included, not just one side.
+    let merge_base = std::process::Command::new("git")
+        .args(["-C", repo_path, "merge-base", sha1, sha2])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let exclude_base = format!("^{}", merge_base.as_deref().unwrap_or(older));
     let log_text = std::process::Command::new("git")
         .args([
             "-C",
