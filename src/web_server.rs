@@ -323,11 +323,13 @@ fn handle_connection(
                 include_log,
                 gia_audio,
             );
+            let diff_section = diff2html_section(repo_path, &sha1, &sha2, theme).ok();
             let html = build_html(
                 &sha1[..sha1.len().min(7)],
                 &sha2[..sha2.len().min(7)],
                 &summary,
                 theme,
+                diff_section,
             );
             send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
         }
@@ -364,11 +366,13 @@ fn handle_connection(
                 effective_prompt
             };
             let summary = run_gia_log(repo_path, &sha1, &sha2, Some(&effective_prompt), gia_audio);
+            let diff_section = diff2html_section(repo_path, &sha1, &sha2, theme).ok();
             let html = build_html(
                 &sha1[..sha1.len().min(7)],
                 &sha2[..sha2.len().min(7)],
                 &summary,
                 theme,
+                diff_section,
             );
             send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
         }
@@ -714,6 +718,211 @@ fn to_json_string(s: &str) -> String {
     }
     out.push('"');
     out
+}
+
+/// Returns a self-contained HTML fragment (styles + divs + scripts) showing the commit history
+/// cards and side-by-side diff. Designed to be appended after the AI summary card.
+fn diff2html_section(
+    repo_path: &str,
+    sha1: &str,
+    sha2: &str,
+    theme: Theme,
+) -> Result<String, String> {
+    let sha1_is_ancestor = std::process::Command::new("git")
+        .args(["-C", repo_path, "merge-base", "--is-ancestor", sha1, sha2])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    let (older, newer) = if sha1_is_ancestor {
+        (sha1, sha2)
+    } else {
+        (sha2, sha1)
+    };
+
+    let diff_bytes = std::process::Command::new("git")
+        .args(["-C", repo_path, "diff", older, newer])
+        .output()
+        .map_err(|e| format!("git diff failed: {e}"))?
+        .stdout;
+
+    let exclude_base = format!("^{older}");
+    let log_text = std::process::Command::new("git")
+        .args([
+            "-C",
+            repo_path,
+            "log",
+            "--pretty=format:### %h, %an, %ar, %D%n%n%s%n%b%n",
+            &exclude_base,
+            sha1,
+            sha2,
+        ])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+
+    let (commit_cards, commit_count) = render_commit_cards(&log_text);
+    let count_label = if commit_count == 1 {
+        "1 commit".to_string()
+    } else {
+        format!("{commit_count} commits")
+    };
+
+    let raw_diff = String::from_utf8_lossy(&diff_bytes);
+    let s1 = &sha1[..sha1.len().min(7)];
+    let s2 = &sha2[..sha2.len().min(7)];
+    let diff_json = to_json_string(&raw_diff);
+
+    let (
+        bg,
+        card_bg,
+        card_border,
+        card_hover,
+        text,
+        sub,
+        dim,
+        h1_col,
+        sha_bg,
+        sha_fg,
+        hash_bg,
+        hash_fg,
+        rh_bg,
+        rh_fg,
+        rb_bg,
+        rb_fg,
+        rr_bg,
+        rr_fg,
+        rt_bg,
+        rt_fg,
+        section_border,
+    ) = match theme {
+        Theme::Dark => (
+            "#0f1117", "#1a1f2e", "#2d3748", "#4a5568", "#e2e8f0", "#718096", "#4a5568", "#63b3ed",
+            "#2d3748", "#a0aec0", "#1e3a5f", "#63b3ed", "#744210", "#fbd38d", "#1e3a5f", "#63b3ed",
+            "#1c4532", "#68d391", "#521b41", "#fbb6ce", "#2d3748",
+        ),
+        Theme::Light => (
+            "#f8fafc", "#ffffff", "#e2e8f0", "#cbd5e1", "#1e293b", "#475569", "#94a3b8", "#2563eb",
+            "#f1f5f9", "#64748b", "#eff6ff", "#1d4ed8", "#fef3c7", "#92400e", "#eff6ff", "#1e40af",
+            "#ecfdf5", "#065f46", "#fdf4ff", "#7e22ce", "#e2e8f0",
+        ),
+    };
+
+    Ok(format!(
+        r#"<style>
+/* ── Commit history section ── */
+.ggv-history {{
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: {bg}; color: {text};
+  padding: 24px 16px 0; margin-top: 32px;
+  border-top: 2px solid {section_border};
+}}
+.ggv-history .page {{ max-width: 1200px; margin: 0 auto; padding-bottom: 24px; border-bottom: 2px solid {section_border}; }}
+.ggv-history .hdr {{
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 16px; flex-wrap: wrap;
+}}
+.ggv-history .hdr h1 {{ font-size: 15px; color: {h1_col}; font-weight: 600; }}
+.ggv-history .sha {{
+  font-family: monospace; font-size: 12px;
+  background: {sha_bg}; padding: 2px 8px;
+  border-radius: 4px; color: {sha_fg};
+}}
+.ggv-history .arrow {{ color: {dim}; }}
+.ggv-history .count {{ font-size: 12px; color: {dim}; margin-left: auto; }}
+.ggv-history .commit {{
+  background: {card_bg}; border: 1px solid {card_border};
+  border-radius: 8px; padding: 12px 16px; margin-bottom: 6px;
+}}
+.ggv-history .commit:hover {{ border-color: {card_hover}; }}
+.ggv-history .meta {{
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 5px; flex-wrap: wrap;
+}}
+.ggv-history .hash {{
+  font-family: monospace; font-size: 12px;
+  background: {hash_bg}; color: {hash_fg};
+  padding: 1px 6px; border-radius: 4px; font-weight: 600;
+}}
+.ggv-history .author {{ font-size: 12px; color: {sub}; }}
+.ggv-history .time {{ font-size: 12px; color: {dim}; margin-left: auto; }}
+.ggv-history .subject {{ font-size: 13px; font-weight: 500; color: {text}; }}
+.ggv-history .body {{
+  font-size: 12px; color: {sub}; white-space: pre-wrap;
+  margin-top: 5px; line-height: 1.5;
+}}
+.ggv-history .ref-head {{
+  background: {rh_bg}; color: {rh_fg};
+  padding: 1px 5px; border-radius: 3px; font-size: 11px; font-weight: 700;
+}}
+.ggv-history .ref-branch {{
+  background: {rb_bg}; color: {rb_fg};
+  padding: 1px 5px; border-radius: 3px; font-size: 11px;
+}}
+.ggv-history .ref-remote {{
+  background: {rr_bg}; color: {rr_fg};
+  padding: 1px 5px; border-radius: 3px; font-size: 11px;
+}}
+.ggv-history .ref-tag {{
+  background: {rt_bg}; color: {rt_fg};
+  padding: 1px 5px; border-radius: 3px; font-size: 11px;
+}}
+.ggv-history .empty {{ color: {dim}; font-size: 13px; padding: 20px 0; }}
+/* ── diff2html section ── */
+{css}
+.ggv-diff {{ padding: 16px; max-width: 1200px; margin: 0 auto; background: #fff; color: #24292e; }}
+.d2h-file-header {{ cursor: pointer; user-select: none; }}
+.d2h-file-header:hover {{ background: #e8eaed; }}
+.ggv-toggle {{ float: right; font-size: 11px; color: #888; margin-left: 8px; transition: transform 0.15s; display: inline-block; }}
+.ggv-collapsed .ggv-toggle {{ transform: rotate(-90deg); }}
+.ggv-file-body {{ overflow: hidden; }}
+.ggv-file-body.ggv-collapsed {{ display: none; }}
+</style>
+<div class="ggv-history">
+  <div class="page">
+    <div class="hdr">
+      <h1>Commit History</h1>
+      <span class="sha">{s1}</span>
+      <span class="arrow">&#8594;</span>
+      <span class="sha">{s2}</span>
+      <span class="count">{count_label}</span>
+    </div>
+    {commit_cards}
+  </div>
+</div>
+<div class="ggv-diff">
+<div id="ggv-diff-content"></div>
+</div>
+<script>{js}</script>
+<script>
+document.getElementById('ggv-diff-content').innerHTML =
+  Diff2Html.html({diff_json}, {{
+    drawFileList: true,
+    matching: 'lines',
+    outputFormat: 'side-by-side'
+  }});
+document.querySelectorAll('.d2h-file-wrapper').forEach(function(wrapper) {{
+  var header = wrapper.querySelector('.d2h-file-header');
+  var body = header && header.nextElementSibling;
+  if (!header || !body) return;
+  body.classList.add('ggv-file-body');
+  var arrow = document.createElement('span');
+  arrow.className = 'ggv-toggle';
+  arrow.textContent = '\u25bc';
+  header.appendChild(arrow);
+  header.addEventListener('click', function() {{
+    var collapsed = body.classList.toggle('ggv-collapsed');
+    header.classList.toggle('ggv-collapsed', collapsed);
+  }});
+}});
+</script>"#,
+        css = DIFF2HTML_CSS,
+        js = DIFF2HTML_JS,
+        s1 = s1,
+        s2 = s2,
+        diff_json = diff_json,
+        commit_cards = commit_cards,
+        count_label = count_label,
+    ))
 }
 
 fn run_diff2html(repo_path: &str, sha1: &str, sha2: &str, theme: Theme) -> Result<String, String> {
@@ -1477,7 +1686,13 @@ fn markdown_to_html(md: &str) -> String {
     html_out
 }
 
-fn build_html(sha1: &str, sha2: &str, summary: &str, theme: Theme) -> String {
+fn build_html(
+    sha1: &str,
+    sha2: &str,
+    summary: &str,
+    theme: Theme,
+    diff_section: Option<String>,
+) -> String {
     let summary_html = markdown_to_html(summary);
     let (
         bg,
@@ -1501,6 +1716,7 @@ fn build_html(sha1: &str, sha2: &str, summary: &str, theme: Theme) -> String {
             "#64748b", "#f1f5f9", "#cbd5e1",
         ),
     };
+    let diff_html = diff_section.unwrap_or_default();
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -1512,8 +1728,11 @@ fn build_html(sha1: &str, sha2: &str, summary: &str, theme: Theme) -> String {
   body {{
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     background: {bg}; color: {text};
+    min-height: 100vh;
+  }}
+  .ai-wrapper {{
     display: flex; justify-content: center;
-    align-items: flex-start; min-height: 100vh; padding: 32px 16px;
+    align-items: flex-start; padding: 32px 16px;
   }}
   .card {{
     background: {card_bg}; border: 1px solid {card_border};
@@ -1556,6 +1775,7 @@ fn build_html(sha1: &str, sha2: &str, summary: &str, theme: Theme) -> String {
 </style>
 </head>
 <body>
+<div class="ai-wrapper">
 <div class="card">
   <h1>AI Diff Summary</h1>
   <div class="shas">
@@ -1565,11 +1785,14 @@ fn build_html(sha1: &str, sha2: &str, summary: &str, theme: Theme) -> String {
   </div>
   <div class="summary">{summary_html}</div>
 </div>
+</div>
+{diff_html}
 </body>
 </html>"#,
         sha1 = sha1,
         sha2 = sha2,
         summary_html = summary_html,
+        diff_html = diff_html,
     )
 }
 
