@@ -9,3 +9,8 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.4", features = ["derive"] }
 anyhow = "1.0"
 pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
+
+[profile.release]
+opt-level = "z"   # optimize for size
+strip = true      # strip symbols from binary
+panic = "abort"   # smaller panic handling
