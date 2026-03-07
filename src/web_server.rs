@@ -338,6 +338,10 @@ fn handle_connection(
                 include_log,
                 gia_audio,
             );
+            if summary.is_empty() {
+                send_response(&mut stream, 200, "text/html; charset=utf-8", "<script>window.close();</script>");
+                return;
+            }
             let diff_section = diff2html_section(repo_path, &sha1, &sha2, theme).ok();
             let html = build_html(
                 &sha1[..sha1.len().min(7)],
@@ -381,6 +385,10 @@ fn handle_connection(
                 effective_prompt
             };
             let summary = run_gia_log(repo_path, &sha1, &sha2, Some(&effective_prompt), gia_audio);
+            if summary.is_empty() {
+                send_response(&mut stream, 200, "text/html; charset=utf-8", "<script>window.close();</script>");
+                return;
+            }
             let diff_section = diff2html_section(repo_path, &sha1, &sha2, theme).ok();
             let html = build_html(
                 &sha1[..sha1.len().min(7)],
@@ -1308,6 +1316,9 @@ fn run_gia_diff(
         .spawn()
     {
         Ok(child) => child,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return "The AI summary feature requires **GIA**, a command-line tool that was not found in PATH.\nPlease install it from: [https://github.com/panjamo/gia](https://github.com/panjamo/gia)".to_string();
+        }
         Err(e) => return format!("Error starting gia: {e}"),
     };
 
@@ -1323,10 +1334,15 @@ fn run_gia_diff(
     let result = match gia.wait_with_output() {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if stdout.is_empty() {
+            let text = if stdout.is_empty() {
                 String::from_utf8_lossy(&out.stderr).trim().to_string()
             } else {
                 stdout
+            };
+            if text.contains("Recording cancelled by user") {
+                String::new()
+            } else {
+                text
             }
         }
         Err(e) => format!("Error waiting for gia: {e}"),
@@ -1389,6 +1405,9 @@ fn run_gia_log(
         .spawn()
     {
         Ok(child) => child,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return "The AI summary feature requires **GIA**, a command-line tool that was not found in PATH.\nPlease install it from: [https://github.com/panjamo/gia](https://github.com/panjamo/gia)".to_string();
+        }
         Err(e) => return format!("Error starting gia: {e}"),
     };
 
@@ -1404,10 +1423,15 @@ fn run_gia_log(
     let result = match gia.wait_with_output() {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if stdout.is_empty() {
+            let text = if stdout.is_empty() {
                 String::from_utf8_lossy(&out.stderr).trim().to_string()
             } else {
                 stdout
+            };
+            if text.contains("Recording cancelled by user") {
+                String::new()
+            } else {
+                text
             }
         }
         Err(e) => format!("Error waiting for gia: {e}"),
