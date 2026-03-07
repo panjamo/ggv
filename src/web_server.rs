@@ -84,6 +84,16 @@ const GIT_LOG_METADATA_FORMAT: &str =
 /// Minimal HTML page that closes itself — sent after fire-and-forget browser actions.
 const HTML_CLOSE_WINDOW: &str = "<html><body><script>window.close();</script></body></html>";
 
+/// URL-encoded text shown in gia's audio recording dialog.
+const AUDIO_DIALOG_TEXT: &str =
+    "A%20Git%20diff%20is%20being%20analyzed%20by%20AI.%0A\
+     Your%20recording%20extends%20the%20prompt%20-%20use%20it%20to%20guide%20the%20analysis%3A%0A%0A\
+     -%20Focus%20on%20specific%20files%20or%20modules%0A\
+     -%20Request%20a%20brief%20summary%20instead%20of%20full%20analysis%0A\
+     -%20Ignore%20test%20files%20or%20certain%20areas%0A\
+     -%20Ask%20for%20a%20risk%20assessment%20or%20improvement%20suggestions%0A\
+     -%20Set%20the%20output%20language%2C%20e.g.%20respond%20in%20German";
+
 pub fn base_url(port: u16) -> String {
     format!("http://[::1]:{}", port)
 }
@@ -813,6 +823,39 @@ document.querySelectorAll('.d2h-file-wrapper').forEach(function(wrapper) {{
     Ok(html)
 }
 
+/// Spawns a background thread that polls for a window titled "Recording..."
+/// and brings it to the foreground. Stops after finding it or after 10 seconds.
+#[cfg(target_os = "windows")]
+fn bring_recording_window_to_foreground() {
+    std::thread::spawn(|| {
+        use std::os::windows::ffi::OsStrExt;
+        extern "system" {
+            fn FindWindowW(lp_class_name: *const u16, lp_window_name: *const u16) -> isize;
+            fn SetForegroundWindow(h_wnd: isize) -> i32;
+            fn ShowWindow(h_wnd: isize, n_cmd_show: i32) -> i32;
+        }
+        let title: Vec<u16> = std::ffi::OsStr::new("Recording...")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            if std::time::Instant::now() > deadline {
+                break;
+            }
+            let hwnd = unsafe { FindWindowW(std::ptr::null(), title.as_ptr()) };
+            if hwnd != 0 {
+                unsafe {
+                    ShowWindow(hwnd, 9); // SW_RESTORE
+                    SetForegroundWindow(hwnd);
+                }
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    });
+}
+
 fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>, gia_audio: bool) {
     let base = match resolve_diff_base(repo_path, sha1, sha2) {
         Ok(b) => b,
@@ -848,6 +891,8 @@ fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>
     let mut gia_args: Vec<String> = vec!["-b".to_string(), effective_prompt.to_string()];
     if gia_audio {
         gia_args.push("-a".to_string());
+        gia_args.push("--audio-dialog-text".to_string());
+        gia_args.push(AUDIO_DIALOG_TEXT.to_string());
     }
     if let Some(ref hp) = header_path {
         gia_args.push("-f".to_string());
@@ -871,6 +916,11 @@ fn run_gia_browser(repo_path: &str, sha1: &str, sha2: &str, prompt: Option<&str>
             return;
         }
     };
+
+    #[cfg(target_os = "windows")]
+    if gia_audio {
+        bring_recording_window_to_foreground();
+    }
 
     if let Some(mut stdin) = gia.stdin.take() {
         let _ = stdin.write_all(&diff);
@@ -970,6 +1020,8 @@ fn run_gia_diff(
     let mut gia_args: Vec<String> = vec![effective_prompt.to_string()];
     if gia_audio {
         gia_args.push("-a".to_string());
+        gia_args.push("--audio-dialog-text".to_string());
+        gia_args.push(AUDIO_DIALOG_TEXT.to_string());
     }
     if let Some(ref hp) = header_path {
         gia_args.push("-f".to_string());
@@ -990,6 +1042,11 @@ fn run_gia_diff(
         Ok(child) => child,
         Err(e) => return format!("Error starting gia: {e}"),
     };
+
+    #[cfg(target_os = "windows")]
+    if gia_audio {
+        bring_recording_window_to_foreground();
+    }
 
     if let Some(mut stdin) = gia.stdin.take() {
         let _ = stdin.write_all(&diff);
@@ -1049,6 +1106,8 @@ fn run_gia_log(
     let mut gia_args: Vec<String> = vec![effective_prompt.to_string()];
     if gia_audio {
         gia_args.push("-a".to_string());
+        gia_args.push("--audio-dialog-text".to_string());
+        gia_args.push(AUDIO_DIALOG_TEXT.to_string());
     }
     if let Some(ref hp) = header_path {
         gia_args.push("-f".to_string());
@@ -1064,6 +1123,11 @@ fn run_gia_log(
         Ok(child) => child,
         Err(e) => return format!("Error starting gia: {e}"),
     };
+
+    #[cfg(target_os = "windows")]
+    if gia_audio {
+        bring_recording_window_to_foreground();
+    }
 
     if let Some(mut stdin) = gia.stdin.take() {
         let _ = stdin.write_all(&log_out.stdout);
@@ -1119,6 +1183,8 @@ fn run_gia_log_browser(
     let mut gia_args: Vec<String> = vec!["-b".to_string(), effective_prompt.to_string()];
     if gia_audio {
         gia_args.push("-a".to_string());
+        gia_args.push("--audio-dialog-text".to_string());
+        gia_args.push(AUDIO_DIALOG_TEXT.to_string());
     }
     if let Some(ref hp) = header_path {
         gia_args.push("-f".to_string());
@@ -1137,6 +1203,11 @@ fn run_gia_log_browser(
             return;
         }
     };
+
+    #[cfg(target_os = "windows")]
+    if gia_audio {
+        bring_recording_window_to_foreground();
+    }
 
     if let Some(mut stdin) = gia.stdin.take() {
         let _ = stdin.write_all(&log_out.stdout);
