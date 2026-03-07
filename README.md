@@ -21,7 +21,7 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **AI Diff Server**: Start a local web server (`-w`) that opens `git difftool` when you left-click an edge count label; right-clicking always offers AI diff options (full diff+log, diff-only, log-only)
 - **Smart AI Diff**: AI summaries use merge-base detection to produce the correct snapshot diff (`git diff`) enriched with structured commit metadata (`git log`) passed to gia as additional context; a "diff-only" variant skips the log metadata for a more focused summary
 - **Multilingual AI Output**: AI summaries are delivered in a configurable language (`-l`/`--lang`, e.g. `de-DE`, `en-US`, `fr-FR`); German is the default
-- **Browser Mode**: AI diff results open in gia's own browser window by default; pass `-b` to disable and receive text output instead
+- **Rendered AI Output**: AI diff summaries are rendered as a styled HTML page in the browser — gia outputs Markdown which is converted to HTML on the fly
 - **Audio Input**: Microphone recording in gia is active by default; the voice input is treated as a filter or direction — e.g. "ignore test files" or "focus only on the API changes" — and is appended to the AI prompt; pass `-N` to disable
 - **Cross-Platform**: Works on Windows, macOS, and Linux
 
@@ -84,7 +84,6 @@ Options:
   -c, --current-branch      Show only refs that are ancestors of HEAD
   -w, --web-server          Start the diff web server
   -P, --web-port <PORT>     Port for the diff server (0 = OS-assigned) [default: 0]
-  -b, --gia-browser         Deactivate gia browser mode; returns text instead of opening its own browser window
   -p, --gia-prompt <TEXT>   Custom prompt passed to gia (overrides built-in default)
   -l, --lang <LOCALE>       Language locale for AI output (e.g. de-DE, en-US, fr-FR) [default: de-DE]
   -N, --no-gia-audio        Deactivate microphone audio recording in gia
@@ -185,12 +184,6 @@ Use a fixed port (useful when the SVG will be reopened later):
 ggv -w -P 8080
 ```
 
-Disable gia browser mode — get text output in the built-in summary page instead:
-
-```bash
-ggv -w -b
-```
-
 Use a custom prompt:
 
 ```bash
@@ -213,8 +206,8 @@ ggv -w -N
 Combined:
 
 ```bash
-ggv -w -b -p "summarize in three bullet points"
-ggv -w -b --lang en-US
+ggv -w -p "summarize in three bullet points"
+ggv -w --lang en-US
 ggv -w -N --lang en-US
 ```
 
@@ -343,6 +336,7 @@ cargo check
 - **clap** — CLI argument parsing
 - **anyhow** — Error handling
 - **chrono** — Date/time formatting
+- **pulldown-cmark** — Markdown to HTML rendering for AI summaries
 
 ## Architecture
 
