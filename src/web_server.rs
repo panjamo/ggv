@@ -4,6 +4,8 @@ use std::net::{IpAddr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::process::Stdio;
 use std::sync::Arc;
 
+use pulldown_cmark::{html, Options, Parser as MdParser};
+
 use crate::filter::RefFilter;
 use crate::graph::GitGraphviz;
 use crate::graphviz::generate_svg;
@@ -1159,7 +1161,7 @@ fn run_gia_diff(
     let header_path = write_header_file(&label1, &label2);
 
     let effective_prompt = prompt.unwrap_or(DEFAULT_DIFF_PROMPT);
-    let mut gia_args: Vec<String> = vec![effective_prompt.to_string()];
+    let mut gia_args: Vec<String> = vec!["--markdown".to_string(), effective_prompt.to_string()];
     if gia_audio {
         gia_args.push("-a".to_string());
         gia_args.push("--audio-dialog-text".to_string());
@@ -1245,7 +1247,7 @@ fn run_gia_log(
     let header_path = write_header_file(&label1, &label2);
 
     let effective_prompt = prompt.unwrap_or(DEFAULT_LOG_PROMPT);
-    let mut gia_args: Vec<String> = vec![effective_prompt.to_string()];
+    let mut gia_args: Vec<String> = vec!["--markdown".to_string(), effective_prompt.to_string()];
     if gia_audio {
         gia_args.push("-a".to_string());
         gia_args.push("--audio-dialog-text".to_string());
@@ -1654,16 +1656,35 @@ fn html_escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+fn markdown_to_html(md: &str) -> String {
+    let mut html_out = String::new();
+    let parser = MdParser::new_ext(md, Options::all());
+    html::push_html(&mut html_out, parser);
+    html_out
+}
+
 fn build_html(sha1: &str, sha2: &str, summary: &str, theme: Theme) -> String {
-    let summary_escaped = html_escape(summary);
-    let (bg, card_bg, card_border, text, sub, dim, h1_col, sha_bg, sha_fg) = match theme {
+    let summary_html = markdown_to_html(summary);
+    let (
+        bg,
+        card_bg,
+        card_border,
+        text,
+        sub,
+        dim,
+        h1_col,
+        sha_bg,
+        sha_fg,
+        code_bg,
+        blockquote_border,
+    ) = match theme {
         Theme::Dark => (
             "#0f1117", "#1a1f2e", "#2d3748", "#e2e8f0", "#718096", "#4a5568", "#63b3ed", "#2d3748",
-            "#a0aec0",
+            "#a0aec0", "#2d3748", "#4a5568",
         ),
         Theme::Light => (
             "#f8fafc", "#ffffff", "#e2e8f0", "#1e293b", "#475569", "#94a3b8", "#2563eb", "#f1f5f9",
-            "#64748b",
+            "#64748b", "#f1f5f9", "#cbd5e1",
         ),
     };
     format!(
@@ -1693,10 +1714,31 @@ fn build_html(sha1: &str, sha2: &str, summary: &str, theme: Theme) -> String {
   }}
   .sha {{ background: {sha_bg}; padding: 2px 8px; border-radius: 4px; color: {sha_fg}; }}
   .arrow {{ color: {dim}; }}
-  .summary {{
-    line-height: 1.7; color: {text}; white-space: pre-wrap;
-    font-size: 13px; font-family: "Segoe UI", ui-sans-serif, sans-serif;
+  .summary {{ line-height: 1.7; color: {text}; font-size: 14px; }}
+  .summary h1, .summary h2, .summary h3, .summary h4 {{
+    color: {h1_col}; margin: 20px 0 8px;
   }}
+  .summary h1 {{ font-size: 20px; }}
+  .summary h2 {{ font-size: 17px; }}
+  .summary h3 {{ font-size: 15px; }}
+  .summary p {{ margin: 8px 0; }}
+  .summary ul, .summary ol {{ margin: 8px 0 8px 24px; }}
+  .summary li {{ margin: 4px 0; }}
+  .summary code {{
+    font-family: monospace; font-size: 12px;
+    background: {code_bg}; padding: 1px 5px; border-radius: 3px;
+  }}
+  .summary pre {{
+    background: {code_bg}; border-radius: 6px; padding: 12px 16px;
+    overflow-x: auto; margin: 10px 0;
+  }}
+  .summary pre code {{ background: none; padding: 0; font-size: 12px; }}
+  .summary blockquote {{
+    border-left: 3px solid {blockquote_border}; margin: 10px 0;
+    padding: 4px 12px; color: {sub};
+  }}
+  .summary a {{ color: {h1_col}; }}
+  .summary hr {{ border: none; border-top: 1px solid {card_border}; margin: 16px 0; }}
 </style>
 </head>
 <body>
@@ -1707,13 +1749,13 @@ fn build_html(sha1: &str, sha2: &str, summary: &str, theme: Theme) -> String {
     <span class="arrow">&#8594;</span>
     <span class="sha">{sha2}</span>
   </div>
-  <div class="summary">{summary}</div>
+  <div class="summary">{summary_html}</div>
 </div>
 </body>
 </html>"#,
         sha1 = sha1,
         sha2 = sha2,
-        summary = summary_escaped,
+        summary_html = summary_html,
     )
 }
 
