@@ -68,14 +68,23 @@ fn regenerate(config: &RegenerateConfig) {
     }
 }
 
-const DEFAULT_DIFF_PROMPT: &str = "Summarize the changes.
-        At the beginning, I would like a paragraph that is two sentences long, where everything is summarized very briefly.
-        After that, you can calmly write a bit more.
-        The summary should be nicely characterized by headings.
-        Structure the whole thing.";
+const DEFAULT_DIFF_PROMPT: &str = "You are an experienced software engineer performing a PR review.
 
-const DEFAULT_LOG_PROMPT: &str = "Summarize the commit history. Focus on what changed and why, based on commit messages and file names only.
-        Be concise and structured with headings if needed.";
+Summarize the following Git diff and commit message in an ultra-compact way.
+
+Rules:
+- Maximum 1–6 bullet points
+- Focus only on the actual code changes
+- Mention only: key changes, affected components, possible breaking changes
+- No explanations for beginners
+- No introduction or filler text
+- Write technically and directly, like a PR review comment
+
+Format:
+- <component / area>: <short description of change>
+";
+
+const DEFAULT_LOG_PROMPT: &str = DEFAULT_DIFF_PROMPT;
 
 /// Git log format used as metadata context when feeding diffs to the AI.
 const GIT_LOG_METADATA_FORMAT: &str =
@@ -862,7 +871,7 @@ fn diff2html_section(
     };
 
     let mut diff_cmd = std::process::Command::new("git");
-    diff_cmd.args(["-C", repo_path, "diff", older, newer]);
+    diff_cmd.args(["-C", repo_path, "diff", "-w", older, newer]);
     if !pathspecs.is_empty() {
         diff_cmd.arg("--");
         diff_cmd.args(pathspecs);
@@ -1131,7 +1140,7 @@ fn run_diff2html(
     };
 
     let mut diff_cmd = std::process::Command::new("git");
-    diff_cmd.args(["-C", repo_path, "diff", older, newer]);
+    diff_cmd.args(["-C", repo_path, "diff", "-w", older, newer]);
     if !pathspecs.is_empty() {
         diff_cmd.arg("--");
         diff_cmd.args(pathspecs);
@@ -1483,7 +1492,7 @@ fn run_gia_diff(
     };
 
     let mut diff_cmd = std::process::Command::new("git");
-    diff_cmd.args(["-C", repo_path, "diff", older, newer]);
+    diff_cmd.args(["-C", repo_path, "diff", "-w", older, newer]);
     if !pathspecs.is_empty() {
         diff_cmd.arg("--");
         diff_cmd.args(pathspecs);
