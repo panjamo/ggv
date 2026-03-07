@@ -123,6 +123,7 @@ pub fn start(
     prompt: Option<String>,
     lang: String,
     gia_audio: bool,
+    theme: Theme,
     mut regen: Option<RegenerateConfig>,
 ) -> anyhow::Result<(std::thread::JoinHandle<()>, u16)> {
     let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
@@ -145,6 +146,7 @@ pub fn start(
             prompt,
             &lang,
             gia_audio,
+            theme,
             regen,
         )
     });
@@ -159,6 +161,7 @@ fn run_server(
     prompt: Option<String>,
     lang: &str,
     gia_audio: bool,
+    theme: Theme,
     regen: Option<Arc<RegenerateConfig>>,
 ) {
     for stream in listener.incoming() {
@@ -178,6 +181,7 @@ fn run_server(
                         prompt_clone,
                         &lang_clone,
                         gia_audio,
+                        theme,
                         regen_clone,
                     )
                 });
@@ -195,6 +199,7 @@ fn handle_connection(
     prompt: Option<String>,
     lang: &str,
     gia_audio: bool,
+    theme: Theme,
     regen: Option<Arc<RegenerateConfig>>,
 ) {
     let reader = BufReader::new(match stream.try_clone() {
@@ -294,7 +299,7 @@ fn handle_connection(
                         &mut stream,
                         200,
                         "text/html; charset=utf-8",
-                        &build_no_diff_html(&sha1, &sha2),
+                        &build_no_diff_html(&sha1, &sha2, theme),
                     );
                     return;
                 }
@@ -315,7 +320,7 @@ fn handle_connection(
                     &mut stream,
                     200,
                     "text/html; charset=utf-8",
-                    &build_no_diff_html(&sha1, &sha2),
+                    &build_no_diff_html(&sha1, &sha2, theme),
                 );
                 return;
             }
@@ -347,6 +352,7 @@ fn handle_connection(
                     &sha1[..sha1.len().min(7)],
                     &sha2[..sha2.len().min(7)],
                     &summary,
+                    theme,
                 );
                 send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
             }
@@ -372,7 +378,7 @@ fn handle_connection(
                     &mut stream,
                     200,
                     "text/html; charset=utf-8",
-                    &build_no_diff_html(&sha1, &sha2),
+                    &build_no_diff_html(&sha1, &sha2, theme),
                 );
                 return;
             }
@@ -398,6 +404,7 @@ fn handle_connection(
                     &sha1[..sha1.len().min(7)],
                     &sha2[..sha2.len().min(7)],
                     &summary,
+                    theme,
                 );
                 send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
             }
@@ -423,11 +430,11 @@ fn handle_connection(
                     &mut stream,
                     200,
                     "text/html; charset=utf-8",
-                    &build_no_diff_html(&sha1, &sha2),
+                    &build_no_diff_html(&sha1, &sha2, theme),
                 );
                 return;
             }
-            let html = serve_git_log(repo_path, &sha1, &sha2);
+            let html = serve_git_log(repo_path, &sha1, &sha2, theme);
             send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
         }
         "/diff2html" => {
@@ -451,7 +458,7 @@ fn handle_connection(
                     &mut stream,
                     200,
                     "text/html; charset=utf-8",
-                    &build_no_diff_html(&sha1, &sha2),
+                    &build_no_diff_html(&sha1, &sha2, theme),
                 );
                 return;
             }
@@ -684,14 +691,18 @@ fn has_git_diff(repo_path: &str, sha1: &str, sha2: &str) -> bool {
         .unwrap_or(true)
 }
 
-fn build_no_diff_html(sha1: &str, sha2: &str) -> String {
+fn build_no_diff_html(sha1: &str, sha2: &str, theme: Theme) -> String {
     let s1 = &sha1[..sha1.len().min(7)];
     let s2 = &sha2[..sha2.len().min(7)];
+    let (bg, box_bg, box_border, text, sub) = match theme {
+        Theme::Dark => ("#0f1117", "#1a1f2e", "#2d3748", "#e2e8f0", "#718096"),
+        Theme::Light => ("#f8fafc", "#ffffff", "#e2e8f0", "#1e293b", "#64748b"),
+    };
     format!(
         r#"<html><head><meta charset="utf-8"><style>
-body{{font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f5f5f5}}
-.box{{background:#fff;border:1px solid #ccc;border-radius:6px;padding:24px 32px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.12)}}
-h3{{margin:0 0 8px}}p{{margin:0 0 16px;color:#555}}button{{padding:6px 20px;cursor:pointer}}
+body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:{bg}}}
+.box{{background:{box_bg};border:1px solid {box_border};border-radius:8px;padding:24px 32px;text-align:center;box-shadow:0 2px 12px rgba(0,0,0,.15)}}
+h3{{margin:0 0 8px;color:{text}}}p{{margin:0 0 16px;color:{sub}}}button{{padding:6px 20px;cursor:pointer;border-radius:4px;border:1px solid {box_border};background:{box_bg};color:{text}}}
 </style></head><body><div class="box">
 <h3>No Differences Found</h3>
 <p>{s1} &rarr; {s2} are identical.</p>
@@ -1219,7 +1230,7 @@ fn run_gia_log_browser(
     }
 }
 
-fn serve_git_log(repo_path: &str, sha1: &str, sha2: &str) -> String {
+fn serve_git_log(repo_path: &str, sha1: &str, sha2: &str, theme: Theme) -> String {
     let base = match resolve_diff_base(repo_path, sha1, sha2) {
         Ok(b) => b,
         Err(e) => return format!("<pre>Error resolving log base: {}</pre>", html_escape(&e)),
@@ -1247,10 +1258,150 @@ fn serve_git_log(repo_path: &str, sha1: &str, sha2: &str) -> String {
         }
     };
 
-    let text = if out.stdout.is_empty() {
-        "No commits found in this range.".to_string()
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    build_log_html(
+        &sha1[..sha1.len().min(7)],
+        &sha2[..sha2.len().min(7)],
+        &text,
+        theme,
+    )
+}
+
+fn render_ref_badge(r: &str) -> String {
+    let r = r.trim();
+    if r.is_empty() {
+        return String::new();
+    }
+    if r.starts_with("HEAD -> ") {
+        let branch = html_escape(&r["HEAD -> ".len()..]);
+        format!(
+            r#"<span class="ref-head">HEAD</span><span class="ref-branch">{branch}</span>"#
+        )
+    } else if r.starts_with("tag: ") {
+        let tag = html_escape(&r["tag: ".len()..]);
+        format!(r#"<span class="ref-tag">{tag}</span>"#)
+    } else if r.contains('/') {
+        format!(r#"<span class="ref-remote">{}</span>"#, html_escape(r))
     } else {
-        String::from_utf8_lossy(&out.stdout).to_string()
+        format!(r#"<span class="ref-branch">{}</span>"#, html_escape(r))
+    }
+}
+
+fn render_ref_badges(refs_str: &str) -> String {
+    refs_str
+        .split(", ")
+        .map(render_ref_badge)
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn build_log_html(sha1: &str, sha2: &str, log_text: &str, theme: Theme) -> String {
+    // Split into per-commit blocks on "### " markers
+    let stripped = log_text.trim_start_matches("### ");
+    let raw_commits: Vec<&str> = stripped.split("\n### ").collect();
+
+    let mut cards = String::new();
+    let mut count = 0usize;
+
+    for entry in &raw_commits {
+        let mut lines = entry.lines();
+        let header = match lines.next() {
+            Some(h) if !h.trim().is_empty() => h.trim(),
+            _ => continue,
+        };
+
+        // header = "hash, author, rel_time[, refs]"
+        let mut parts = header.splitn(4, ", ");
+        let hash = parts.next().unwrap_or("");
+        let author = parts.next().unwrap_or("");
+        let rel_time = parts.next().unwrap_or("");
+        let refs_str = parts.next().unwrap_or("");
+
+        // Skip the blank separator line, then read subject + body
+        let mut subject = String::new();
+        let mut body_lines: Vec<&str> = Vec::new();
+        let mut past_blank = false;
+        for line in lines {
+            if !past_blank {
+                if line.trim().is_empty() {
+                    past_blank = true;
+                }
+                continue;
+            }
+            if subject.is_empty() {
+                subject = line.to_string();
+            } else {
+                body_lines.push(line);
+            }
+        }
+        while body_lines.last().map(|l: &&str| l.trim().is_empty()).unwrap_or(false) {
+            body_lines.pop();
+        }
+
+        let ref_badges = render_ref_badges(refs_str);
+        let body_html = if body_lines.is_empty() {
+            String::new()
+        } else {
+            format!(
+                r#"<div class="body">{}</div>"#,
+                html_escape(&body_lines.join("\n"))
+            )
+        };
+
+        cards.push_str(&format!(
+            r#"<div class="commit">
+  <div class="meta">
+    <span class="hash">{hash}</span>{refs}<span class="author">{author}</span>
+    <span class="time">{time}</span>
+  </div>
+  <div class="subject">{subject}</div>{body}
+</div>"#,
+            hash = html_escape(hash),
+            refs = if ref_badges.is_empty() {
+                String::new()
+            } else {
+                format!(" {ref_badges} ")
+            },
+            author = html_escape(author),
+            time = html_escape(rel_time),
+            subject = html_escape(&subject),
+            body = if body_html.is_empty() {
+                String::new()
+            } else {
+                format!("\n  {body_html}")
+            },
+        ));
+        count += 1;
+    }
+
+    if count == 0 {
+        cards.push_str(r#"<p class="empty">No commits found in this range.</p>"#);
+    }
+
+    let count_label = if count == 1 {
+        "1 commit".to_string()
+    } else {
+        format!("{count} commits")
+    };
+
+    // Palette — (bg, card_bg, card_border, card_hover, text, sub, dim, h1,
+    //            sha_bg, sha_fg, hash_bg, hash_fg,
+    //            ref_head_bg, ref_head_fg, ref_branch_bg, ref_branch_fg,
+    //            ref_remote_bg, ref_remote_fg, ref_tag_bg, ref_tag_fg)
+    let (bg, card_bg, card_border, card_hover, text, sub, dim, h1_col,
+         sha_bg, sha_fg, hash_bg, hash_fg,
+         rh_bg, rh_fg, rb_bg, rb_fg, rr_bg, rr_fg, rt_bg, rt_fg) = match theme {
+        Theme::Dark => (
+            "#0f1117", "#1a1f2e", "#2d3748", "#4a5568", "#e2e8f0", "#718096", "#4a5568", "#63b3ed",
+            "#2d3748", "#a0aec0", "#1e3a5f", "#63b3ed",
+            "#744210", "#fbd38d", "#1e3a5f", "#63b3ed", "#1c4532", "#68d391", "#521b41", "#fbb6ce",
+        ),
+        Theme::Light => (
+            "#f8fafc", "#ffffff", "#e2e8f0", "#cbd5e1", "#1e293b", "#475569", "#94a3b8", "#2563eb",
+            "#f1f5f9", "#64748b", "#eff6ff", "#1d4ed8",
+            "#fef3c7", "#92400e", "#eff6ff", "#1e40af", "#ecfdf5", "#065f46", "#fdf4ff", "#7e22ce",
+        ),
     };
 
     format!(
@@ -1258,49 +1409,84 @@ fn serve_git_log(repo_path: &str, sha1: &str, sha2: &str) -> String {
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Git Log</title>
+<title>Commit History</title>
 <style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{
-    font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
-    background: #0f1117;
-    color: #e2e8f0;
-    padding: 24px;
-    font-size: 13px;
-    line-height: 1.6;
-  }}
-  h1 {{ font-size: 15px; color: #63b3ed; margin-bottom: 16px; font-family: "Segoe UI", sans-serif; }}
-  .shas {{
-    font-size: 12px;
-    color: #718096;
-    margin-bottom: 20px;
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    font-family: "Segoe UI", sans-serif;
-  }}
-  .sha {{ background: #2d3748; padding: 2px 8px; border-radius: 4px; color: #a0aec0; }}
-  .arrow {{ color: #4a5568; }}
-  pre {{
-    white-space: pre-wrap;
-    word-break: break-all;
-    color: #cbd5e0;
-  }}
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: {bg}; color: {text};
+  padding: 32px 16px; min-height: 100vh;
+}}
+.page {{ max-width: 900px; margin: 0 auto; }}
+.hdr {{
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 24px; flex-wrap: wrap;
+}}
+.hdr h1 {{ font-size: 16px; color: {h1_col}; font-weight: 600; }}
+.sha {{
+  font-family: monospace; font-size: 12px;
+  background: {sha_bg}; padding: 2px 8px;
+  border-radius: 4px; color: {sha_fg};
+}}
+.arrow {{ color: {dim}; }}
+.count {{ font-size: 12px; color: {dim}; margin-left: auto; }}
+.commit {{
+  background: {card_bg}; border: 1px solid {card_border};
+  border-radius: 8px; padding: 14px 18px; margin-bottom: 8px;
+}}
+.commit:hover {{ border-color: {card_hover}; }}
+.meta {{
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 6px; flex-wrap: wrap;
+}}
+.hash {{
+  font-family: monospace; font-size: 12px;
+  background: {hash_bg}; color: {hash_fg};
+  padding: 1px 6px; border-radius: 4px; font-weight: 600;
+}}
+.author {{ font-size: 12px; color: {sub}; }}
+.time {{ font-size: 12px; color: {dim}; margin-left: auto; }}
+.subject {{ font-size: 14px; font-weight: 500; color: {text}; }}
+.body {{
+  font-size: 12px; color: {sub}; white-space: pre-wrap;
+  margin-top: 6px; line-height: 1.6;
+}}
+.ref-head {{
+  background: {rh_bg}; color: {rh_fg};
+  padding: 1px 5px; border-radius: 3px; font-size: 11px; font-weight: 700;
+}}
+.ref-branch {{
+  background: {rb_bg}; color: {rb_fg};
+  padding: 1px 5px; border-radius: 3px; font-size: 11px;
+}}
+.ref-remote {{
+  background: {rr_bg}; color: {rr_fg};
+  padding: 1px 5px; border-radius: 3px; font-size: 11px;
+}}
+.ref-tag {{
+  background: {rt_bg}; color: {rt_fg};
+  padding: 1px 5px; border-radius: 3px; font-size: 11px;
+}}
+.empty {{ color: {dim}; font-size: 14px; text-align: center; padding: 40px; }}
 </style>
 </head>
 <body>
-<h1>Git Log</h1>
-<div class="shas">
-  <span class="sha">{sha1}</span>
-  <span class="arrow">&#8594;</span>
-  <span class="sha">{sha2}</span>
+<div class="page">
+  <div class="hdr">
+    <h1>Commit History</h1>
+    <span class="sha">{sha1}</span>
+    <span class="arrow">&#8594;</span>
+    <span class="sha">{sha2}</span>
+    <span class="count">{count_label}</span>
+  </div>
+  {cards}
 </div>
-<pre>{log}</pre>
 </body>
 </html>"#,
-        sha1 = &sha1[..sha1.len().min(7)],
-        sha2 = &sha2[..sha2.len().min(7)],
-        log = html_escape(&text),
+        sha1 = sha1,
+        sha2 = sha2,
+        count_label = count_label,
+        cards = cards,
     )
 }
 
@@ -1311,8 +1497,18 @@ fn html_escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-fn build_html(sha1: &str, sha2: &str, summary: &str) -> String {
+fn build_html(sha1: &str, sha2: &str, summary: &str, theme: Theme) -> String {
     let summary_escaped = html_escape(summary);
+    let (bg, card_bg, card_border, text, sub, dim, h1_col, sha_bg, sha_fg) = match theme {
+        Theme::Dark => (
+            "#0f1117", "#1a1f2e", "#2d3748", "#e2e8f0", "#718096", "#4a5568",
+            "#63b3ed", "#2d3748", "#a0aec0",
+        ),
+        Theme::Light => (
+            "#f8fafc", "#ffffff", "#e2e8f0", "#1e293b", "#475569", "#94a3b8",
+            "#2563eb", "#f1f5f9", "#64748b",
+        ),
+    };
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -1323,41 +1519,26 @@ fn build_html(sha1: &str, sha2: &str, summary: &str) -> String {
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: #0f1117;
-    color: #e2e8f0;
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    min-height: 100vh;
-    padding: 32px 16px;
+    background: {bg}; color: {text};
+    display: flex; justify-content: center;
+    align-items: flex-start; min-height: 100vh; padding: 32px 16px;
   }}
   .card {{
-    background: #1a1f2e;
-    border: 1px solid #2d3748;
-    border-radius: 12px;
-    padding: 32px 40px;
-    max-width: 960px;
-    width: 100%;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    background: {card_bg}; border: 1px solid {card_border};
+    border-radius: 12px; padding: 32px 40px;
+    max-width: 960px; width: 100%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.1);
   }}
-  h1 {{ font-size: 18px; color: #63b3ed; margin-bottom: 16px; }}
+  h1 {{ font-size: 18px; color: {h1_col}; margin-bottom: 16px; }}
   .shas {{
-    font-family: monospace;
-    font-size: 12px;
-    color: #718096;
-    margin-bottom: 24px;
-    display: flex;
-    gap: 8px;
-    align-items: center;
+    font-family: monospace; font-size: 12px; color: {sub};
+    margin-bottom: 24px; display: flex; gap: 8px; align-items: center;
   }}
-  .sha {{ background: #2d3748; padding: 2px 8px; border-radius: 4px; color: #a0aec0; }}
-  .arrow {{ color: #4a5568; }}
+  .sha {{ background: {sha_bg}; padding: 2px 8px; border-radius: 4px; color: {sha_fg}; }}
+  .arrow {{ color: {dim}; }}
   .summary {{
-    line-height: 1.7;
-    color: #e2e8f0;
-    white-space: pre-wrap;
-    font-size: 13px;
-    font-family: "Segoe UI", ui-sans-serif, sans-serif;
+    line-height: 1.7; color: {text}; white-space: pre-wrap;
+    font-size: 13px; font-family: "Segoe UI", ui-sans-serif, sans-serif;
   }}
 </style>
 </head>
