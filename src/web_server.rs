@@ -56,7 +56,8 @@ fn regenerate(config: &RegenerateConfig) {
     } else {
         Some(config.web_server_url.as_str())
     };
-    match generate_svg(&config.dot_path, git_viz.forge_url(), ws_url) {
+    let repo_name = crate::utils::repo_name_from_path(&config.repo_path);
+    match generate_svg(&config.dot_path, git_viz.forge_url(), ws_url, &repo_name) {
         Ok(_) => {
             if !config.keep_dot {
                 let _ = std::fs::remove_file(&config.dot_path);
@@ -208,7 +209,8 @@ fn handle_connection(
 
     match path {
         "/view" => {
-            serve_svg(&mut stream, svg_path);
+            let repo_name = crate::utils::repo_name_from_path(repo_path);
+            serve_svg(&mut stream, svg_path, &repo_name);
         }
         "/version" => {
             let version = svg_mtime(svg_path);
@@ -475,7 +477,7 @@ fn svg_mtime(svg_path: &str) -> String {
         .unwrap_or_else(|_| "0".to_string())
 }
 
-fn serve_svg(stream: &mut TcpStream, svg_path: &str) {
+fn serve_svg(stream: &mut TcpStream, svg_path: &str, repo_name: &str) {
     let svg_content = match std::fs::read_to_string(svg_path) {
         Ok(c) => c,
         Err(_) => {
@@ -489,12 +491,15 @@ fn serve_svg(stream: &mut TcpStream, svg_path: &str) {
     } else {
         svg_content.as_str()
     };
+    // Inline SVG favicon: three commits (green main branch) + one branch commit (blue)
+    let favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cline x1='5' y1='1' x2='5' y2='15' stroke='%234ade80' stroke-width='1.5'/%3E%3Cline x1='5' y1='5' x2='11' y2='11' stroke='%2360a5fa' stroke-width='1.5'/%3E%3Ccircle cx='5' cy='2' r='2' fill='%234ade80'/%3E%3Ccircle cx='5' cy='6' r='2' fill='%234ade80'/%3E%3Ccircle cx='5' cy='14' r='2' fill='%234ade80'/%3E%3Ccircle cx='11' cy='11' r='2' fill='%2360a5fa'/%3E%3C/svg%3E";
     let html = format!(
         r#"<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>GGV</title>
+<title>⎇ {repo_name}</title>
+<link rel="icon" type="image/svg+xml" href="{favicon}">
 <style>
   body {{ margin: 0; background: #1a1f2e; overflow: auto; }}
   svg {{ display: block; }}

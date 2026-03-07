@@ -62,6 +62,7 @@ pub fn generate_svg(
     dot_path: &str,
     forge_url: Option<&str>,
     web_server_url: Option<&str>,
+    repo_name: &str,
 ) -> Result<String> {
     let dot_file = Path::new(dot_path);
     let svg_path = dot_file.with_extension("svg");
@@ -106,7 +107,7 @@ pub fn generate_svg(
     }
 
     let svg_path_str = svg_path.to_string_lossy().to_string();
-    inject_interactive_js(&svg_path_str, forge_url, web_server_url)?;
+    inject_interactive_js(&svg_path_str, forge_url, web_server_url, repo_name)?;
     println!("Generated SVG file: {}", svg_path_str);
     Ok(svg_path_str)
 }
@@ -115,6 +116,7 @@ fn inject_interactive_js(
     svg_path: &str,
     forge_url: Option<&str>,
     web_server_url: Option<&str>,
+    repo_name: &str,
 ) -> Result<()> {
     let content = std::fs::read_to_string(svg_path)
         .with_context(|| format!("Failed to read SVG: {}", svg_path))?;
@@ -547,6 +549,20 @@ window.addEventListener('load', function() {
         "class=\"node\">",
         "class=\"node\" onclick=\"copyHash(this)\" style=\"cursor:pointer;\">",
     );
+
+    // Replace the first SVG <title> element (Graphviz sets it to the graph name "git")
+    // with the repository name so the browser tab shows a useful title.
+    let modified = if let Some(start) = modified.find("<title>") {
+        if let Some(end) = modified[start..].find("</title>") {
+            let before = &modified[..start];
+            let after = &modified[start + end + "</title>".len()..];
+            format!("{}<title>\u{2387} {}</title>{}", before, repo_name, after)
+        } else {
+            modified
+        }
+    } else {
+        modified
+    };
 
     std::fs::write(svg_path, modified)
         .with_context(|| format!("Failed to write SVG: {}", svg_path))?;

@@ -36,8 +36,8 @@ fn main() -> Result<()> {
         fetch_tags(&args.repo_path)?;
     }
 
+    let repo_name = repo_name_from_path(&args.repo_path);
     let output = args.output.unwrap_or_else(|| {
-        let repo_name = repo_name_from_path(&args.repo_path);
         match &args.from {
             Some(from) => {
                 let safe_from: String = from
@@ -50,9 +50,9 @@ fn main() -> Result<()> {
                         }
                     })
                     .collect();
-                format!("ggv-{}-from-{}.dot", repo_name, safe_from)
+                format!("ggv-{}-from-{}.dot", &repo_name, safe_from)
             }
-            None => format!("ggv-{}.dot", repo_name),
+            None => format!("ggv-{}.dot", &repo_name),
         }
     });
 
@@ -102,7 +102,7 @@ fn main() -> Result<()> {
     git_viz.generate_dot(&output)?;
 
     if !args.no_show {
-        let generated_svg = generate_svg(&output, git_viz.forge_url(), web_server_url.as_deref())?;
+        let generated_svg = generate_svg(&output, git_viz.forge_url(), web_server_url.as_deref(), &repo_name)?;
         if !args.keep_dot {
             std::fs::remove_file(&output)
                 .with_context(|| format!("Failed to delete DOT file: {}", output))?;
