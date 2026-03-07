@@ -140,6 +140,23 @@ fn inject_interactive_js(
 
     let script_template = r#"<script type="text/ecmascript">
 //<![CDATA[
+function showCopiedToast(text) {
+  var toast = document.getElementById('ggv-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'ggv-toast';
+    toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);pointer-events:none;font-family:"Segoe UI",sans-serif;font-size:11px;color:#718096;padding:3px 8px;';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = 'Copied SHA-1 Hash to clipboard: ' + text.slice(0, 8) + '\u2026';
+  toast.style.transition = 'none';
+  toast.style.opacity = '1';
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(function() {
+    toast.style.transition = 'opacity 0.4s';
+    toast.style.opacity = '0';
+  }, 1500);
+}
 function copyHash(el) {
   if (window._dragJustHappened) { window._dragJustHappened = false; return; }
   var t = el.querySelector('title');
@@ -152,6 +169,7 @@ function copyHash(el) {
       s.setAttribute('stroke', '#f59e0b');
       setTimeout(function() { s.setAttribute('stroke', orig); }, 500);
     });
+    showCopiedToast(sha);
   });
 }
 window.addEventListener('load', function() {
@@ -422,21 +440,21 @@ window.addEventListener('load', function() {
         }
         ctxMenu.appendChild(makeDivider());
         ctxMenu.appendChild(makeMenuItem('Copy Commit SHA', function() {
-          navigator.clipboard.writeText(sha);
+          navigator.clipboard.writeText(sha).then(function() { showCopiedToast(sha); });
         }));
         refs.local.forEach(function(name) {
           ctxMenu.appendChild(makeMenuItem('Copy Branch Name: ' + name, function() {
-            navigator.clipboard.writeText(name);
+            navigator.clipboard.writeText(name).then(function() { showCopiedToast(name); });
           }));
         });
         refs.remote.forEach(function(name) {
           ctxMenu.appendChild(makeMenuItem('Copy Branch Name: ' + name, function() {
-            navigator.clipboard.writeText(name);
+            navigator.clipboard.writeText(name).then(function() { showCopiedToast(name); });
           }));
         });
         refs.tags.forEach(function(name) {
           ctxMenu.appendChild(makeMenuItem('Copy Tag Name: ' + name, function() {
-            navigator.clipboard.writeText(name);
+            navigator.clipboard.writeText(name).then(function() { showCopiedToast(name); });
           }));
         });
         if (refs.local.length > 0 || refs.remote.length > 0 || refs.tags.length > 0) {
