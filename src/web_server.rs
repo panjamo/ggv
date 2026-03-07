@@ -1231,7 +1231,7 @@ fn serve_git_log(repo_path: &str, sha1: &str, sha2: &str) -> String {
             "-C",
             repo_path,
             "log",
-            "--pretty=format:### %h, %ar, %ci, %D%n%n%s%n%b%n",
+            "--pretty=format:### %h, %an, %ar, %D%n%n%s%n%b%n",
             &exclude_base,
             sha1,
             sha2,
