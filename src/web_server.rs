@@ -1468,9 +1468,22 @@ fn run_gia_diff(
         Err(e) => return format!("Error resolving diff base: {e}"),
     };
 
-    // Snapshot diff: diff(base, sha2)
+    // Determine chronological order (same logic as run_diff2html) so we
+    // always diff older → newer. When sha2 is an ancestor of sha1, using
+    // `base` (= sha2) as both start and end produced an empty diff.
+    let sha1_is_ancestor = std::process::Command::new("git")
+        .args(["-C", repo_path, "merge-base", "--is-ancestor", sha1, sha2])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    let (older, newer) = if sha1_is_ancestor {
+        (sha1, sha2)
+    } else {
+        (sha2, sha1)
+    };
+
     let mut diff_cmd = std::process::Command::new("git");
-    diff_cmd.args(["-C", repo_path, "diff", &base, sha2]);
+    diff_cmd.args(["-C", repo_path, "diff", older, newer]);
     if !pathspecs.is_empty() {
         diff_cmd.arg("--");
         diff_cmd.args(pathspecs);
