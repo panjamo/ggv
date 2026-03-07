@@ -130,8 +130,7 @@ impl GitGraphviz {
             let id_str = oid.to_string();
             let short_id = format!("{:.7}", id_str);
             let message = commit.summary().unwrap_or("").to_string();
-            // Skip author to avoid potential UTF-8 panics
-            let author = String::new();
+            let author = String::from_utf8_lossy(commit.author().name_bytes()).to_string();
             let when = time_ago(commit.time().seconds());
             result.push((short_id, message, author, when));
             if result.len() >= max {
