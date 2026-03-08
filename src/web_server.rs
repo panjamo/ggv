@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write as IoWrite};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use pulldown_cmark::{html, Options, Parser as MdParser};
 
@@ -121,6 +123,12 @@ for example, specifying what should or should not be considered in the analysis.
 
 /// Binds to the given port (0 = OS-assigned) and spawns the server thread.
 /// Returns the join handle and the actual bound port.
+/// Seconds without a heartbeat before GGV shuts itself down.
+/// Only triggers after the first heartbeat has been received.
+const HEARTBEAT_TIMEOUT_SECS: u64 = 8s;
+/// Interval at which the watchdog checks the heartbeat timestamp.
+const WATCHDOG_INTERVAL_SECS: u64 = 2;
+
 pub fn start(
     port: u16,
     repo_path: String,
@@ -142,9 +150,30 @@ pub fn start(
         cfg.web_server_url = base_url(actual_port);
     }
     let regen = regen.map(Arc::new);
+
+    // Heartbeat: 0 = no heartbeat received yet; otherwise UNIX timestamp of last ping.
+    let last_hb: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
+
+    // Watchdog thread: exits the process if the page has been closed.
+    let last_hb_watchdog = last_hb.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(WATCHDOG_INTERVAL_SECS));
+        let ts = last_hb_watchdog.load(Ordering::Relaxed);
+        if ts > 0 {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            if now.saturating_sub(ts) >= HEARTBEAT_TIMEOUT_SECS {
+                eprintln!("No heartbeat for {HEARTBEAT_TIMEOUT_SECS}s — shutting down.");
+                std::process::exit(0);
+            }
+        }
+    });
+
     let handle = std::thread::spawn(move || {
         run_server(
-            listener, &repo_path, &svg_path, prompt, &lang, gia_audio, theme, regen,
+            listener, &repo_path, &svg_path, prompt, &lang, gia_audio, theme, regen, last_hb,
         )
     });
     Ok((handle, actual_port))
@@ -159,6 +188,7 @@ fn run_server(
     gia_audio: bool,
     theme: Theme,
     regen: Option<Arc<RegenerateConfig>>,
+    last_hb: Arc<AtomicU64>,
 ) {
     for stream in listener.incoming() {
         match stream {
@@ -168,6 +198,7 @@ fn run_server(
                 let prompt_clone = prompt.clone();
                 let lang_clone = lang.to_string();
                 let regen_clone = regen.clone();
+                let last_hb_clone = last_hb.clone();
                 std::thread::spawn(move || {
                     handle_connection(
                         stream,
@@ -178,6 +209,7 @@ fn run_server(
                         gia_audio,
                         theme,
                         regen_clone,
+                        last_hb_clone,
                     )
                 });
             }
@@ -195,6 +227,7 @@ fn handle_connection(
     gia_audio: bool,
     theme: Theme,
     regen: Option<Arc<RegenerateConfig>>,
+    last_hb: Arc<AtomicU64>,
 ) {
     let reader = BufReader::new(match stream.try_clone() {
         Ok(s) => s,
@@ -217,6 +250,14 @@ fn handle_connection(
     };
 
     match path {
+        "/heartbeat" => {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            last_hb.store(now, Ordering::Relaxed);
+            send_response(&mut stream, 200, "text/plain", "OK");
+        }
         "/view" => {
             let repo_name = crate::utils::repo_name_from_path(repo_path);
             serve_svg(&mut stream, svg_path, &repo_name);
@@ -543,6 +584,7 @@ fn serve_svg(stream: &mut TcpStream, svg_path: &str, repo_name: &str) {
   }}
   setInterval(poll, 1500);
   poll();
+  setInterval(function() {{ fetch('/heartbeat').catch(function(){{}}); }}, 2000);
 }})();
 </script>
 </head>
