@@ -4,7 +4,8 @@ use crate::theme::Theme;
 
 #[derive(Parser)]
 #[command(name = "ggv")]
-#[command(about = "Git Graph Visualizer - Generate Graphviz DOT files from Git repositories")]
+#[command(version = concat!("0.1.", env!("GGV_COMMIT_COUNT")))]
+#[command(about = concat!("Git Graph Visualizer v0.1.", env!("GGV_COMMIT_COUNT"), " - Generate Graphviz DOT files from Git repositories"))]
 pub struct Args {
     #[arg(short, long, help = "Path to Git repository", default_value = ".")]
     pub repo_path: String,
