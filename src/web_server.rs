@@ -125,9 +125,9 @@ for example, specifying what should or should not be considered in the analysis.
 /// Returns the join handle and the actual bound port.
 /// Seconds without a heartbeat before GGV shuts itself down.
 /// Only triggers after the first heartbeat has been received.
-const HEARTBEAT_TIMEOUT_SECS: u64 = 8;
+const HEARTBEAT_TIMEOUT_SECS: u64 = 300;
 /// Interval at which the watchdog checks the heartbeat timestamp.
-const WATCHDOG_INTERVAL_SECS: u64 = 2;
+const WATCHDOG_INTERVAL_SECS: u64 = 10;
 
 pub fn start(
     port: u16,
