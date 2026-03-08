@@ -528,6 +528,51 @@ fn handle_connection(
                 Err(e) => send_response(&mut stream, 500, "text/plain", &e),
             }
         }
+        "/diff2html-single" => {
+            let params = parse_query(query);
+            let commit = match params.get("commit") {
+                Some(s) if is_valid_sha(s) => s.clone(),
+                _ => {
+                    send_response(
+                        &mut stream,
+                        400,
+                        "text/plain",
+                        "Invalid or missing 'commit'",
+                    );
+                    return;
+                }
+            };
+            // Resolve the parent commit hash
+            let parent = std::process::Command::new("git")
+                .args(["-C", repo_path, "log", "-1", "--pretty=%P", &commit])
+                .output()
+                .ok()
+                .and_then(|o| {
+                    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    // Take first parent if there are multiple
+                    s.split_whitespace().next().map(|p| p[..p.len().min(40)].to_string())
+                });
+            let (sha1, sha2) = match parent {
+                Some(p) if !p.is_empty() => (p, commit),
+                // Root commit (no parent): diff against empty tree
+                _ => ("4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string(), commit),
+            };
+            let filter_str = params.get("filter").cloned().unwrap_or_default();
+            let pathspecs = parse_pathspec(&filter_str);
+            if !has_git_diff(repo_path, &sha1, &sha2, &pathspecs) {
+                send_response(
+                    &mut stream,
+                    200,
+                    "text/html; charset=utf-8",
+                    &build_no_diff_html(&sha1, &sha2, theme),
+                );
+                return;
+            }
+            match run_diff2html(repo_path, &sha1, &sha2, theme, &pathspecs, &filter_str) {
+                Ok(html) => send_response(&mut stream, 200, "text/html; charset=utf-8", &html),
+                Err(e) => send_response(&mut stream, 500, "text/plain", &e),
+            }
+        }
         _ => {
             send_response(&mut stream, 404, "text/plain", "Not Found");
         }
@@ -1051,7 +1096,9 @@ fn diff2html_section(
   font-family: monospace; font-size: 12px;
   background: {hash_bg}; color: {hash_fg};
   padding: 1px 6px; border-radius: 4px; font-weight: 600;
+  text-decoration: none; cursor: pointer;
 }}
+.ggv-history .hash:hover {{ opacity: 0.8; text-decoration: underline; }}
 .ggv-history .author {{ font-size: 12px; color: {sub}; }}
 .ggv-history .time {{ font-size: 12px; color: {dim}; margin-left: auto; }}
 .ggv-history .subject {{ font-size: 13px; font-weight: 500; color: {text}; }}
@@ -1307,7 +1354,9 @@ fn run_diff2html(
   font-family: monospace; font-size: 12px;
   background: {hash_bg}; color: {hash_fg};
   padding: 1px 6px; border-radius: 4px; font-weight: 600;
+  text-decoration: none; cursor: pointer;
 }}
+.ggv-history .hash:hover {{ opacity: 0.8; text-decoration: underline; }}
 .ggv-history .author {{ font-size: 12px; color: {sub}; }}
 .ggv-history .time {{ font-size: 12px; color: {dim}; margin-left: auto; }}
 .ggv-history .subject {{ font-size: 13px; font-weight: 500; color: {text}; }}
@@ -1848,11 +1897,12 @@ fn render_commit_cards(log_text: &str) -> (String, usize) {
         cards.push_str(&format!(
             r#"<div class="commit">
   <div class="meta">
-    <span class="hash">{hash}</span>{refs}<span class="author">{author}</span>
+    <a class="hash" href="/diff2html-single?commit={hash_raw}" title="View this commit">{hash}</a>{refs}<span class="author">{author}</span>
     <span class="time">{time}</span>
   </div>
   <div class="subject">{subject}</div>{body}
 </div>"#,
+            hash_raw = html_escape(hash),
             hash = html_escape(hash),
             refs = if ref_badges.is_empty() {
                 String::new()
@@ -1964,7 +2014,9 @@ body {{
   font-family: monospace; font-size: 12px;
   background: {hash_bg}; color: {hash_fg};
   padding: 1px 6px; border-radius: 4px; font-weight: 600;
+  text-decoration: none; cursor: pointer;
 }}
+.hash:hover {{ opacity: 0.8; text-decoration: underline; }}
 .author {{ font-size: 12px; color: {sub}; }}
 .time {{ font-size: 12px; color: {dim}; margin-left: auto; }}
 .subject {{ font-size: 14px; font-weight: 500; color: {text}; }}
