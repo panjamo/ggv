@@ -1088,6 +1088,7 @@ fn diff2html_section(
   border-radius: 8px; padding: 12px 16px; margin-bottom: 6px;
 }}
 .ggv-history .commit:hover {{ border-color: {card_hover}; }}
+.ggv-history .commit.compare-first {{ border-color: #f6ad55 !important; box-shadow: 0 0 0 2px rgba(246,173,85,0.2); }}
 .ggv-history .meta {{
   display: flex; align-items: center; gap: 6px;
   margin-bottom: 5px; flex-wrap: wrap;
@@ -1196,6 +1197,67 @@ function ggvClearFilter(){{
   u.searchParams.delete('filter');
   window.location.href = u.toString();
 }}
+(function(){{
+  var KEY = 'ggv-compare-first';
+  var firstSha = localStorage.getItem(KEY);
+  var ctxMenu = null;
+  function removeMenu() {{ if (ctxMenu) {{ ctxMenu.remove(); ctxMenu = null; }} }}
+  function makeItem(label, action) {{
+    var item = document.createElement('div');
+    item.textContent = label;
+    item.style.cssText = 'padding:8px 16px;cursor:pointer;color:#e2e8f0;font-size:13px;white-space:nowrap;';
+    item.addEventListener('mouseenter', function() {{ item.style.background = '#2d3748'; }});
+    item.addEventListener('mouseleave', function() {{ item.style.background = ''; }});
+    item.addEventListener('click', function(e) {{ e.stopPropagation(); removeMenu(); action(); }});
+    return item;
+  }}
+  function makeDivider() {{
+    var d = document.createElement('div');
+    d.style.cssText = 'height:1px;background:#2d3748;margin:4px 0;';
+    return d;
+  }}
+  function applyHighlight() {{
+    document.querySelectorAll('.commit[data-hash]').forEach(function(el) {{
+      el.classList.toggle('compare-first', el.dataset.hash === firstSha);
+    }});
+  }}
+  document.addEventListener('click', removeMenu);
+  document.addEventListener('keydown', function(e) {{ if (e.key === 'Escape') removeMenu(); }});
+  document.querySelectorAll('.commit[data-hash]').forEach(function(el) {{
+    el.addEventListener('contextmenu', function(e) {{
+      e.preventDefault();
+      removeMenu();
+      var sha = el.dataset.hash;
+      var short = sha.slice(0, 7);
+      ctxMenu = document.createElement('div');
+      ctxMenu.style.cssText = 'position:fixed;left:' + e.clientX + 'px;top:' + e.clientY + 'px;background:#1a1f2e;border:1px solid #2d3748;border-radius:8px;padding:4px 0;z-index:9999;min-width:210px;box-shadow:0 8px 24px rgba(0,0,0,.6);font-family:"Segoe UI",sans-serif;';
+      if (firstSha && firstSha !== sha) {{
+        ctxMenu.appendChild(makeItem('Compare with \u2026' + firstSha.slice(0, 7), function() {{
+          window.open(window.location.origin + '/diff2html?from=' + firstSha + '&to=' + sha, '_blank');
+        }}));
+        ctxMenu.appendChild(makeDivider());
+      }}
+      if (firstSha === sha) {{
+        ctxMenu.appendChild(makeItem('Deselect first commit', function() {{
+          firstSha = null;
+          localStorage.removeItem(KEY);
+          applyHighlight();
+        }}));
+      }} else {{
+        ctxMenu.appendChild(makeItem(firstSha ? 'Change first commit' : 'Select as first commit', function() {{
+          firstSha = sha;
+          localStorage.setItem(KEY, sha);
+          applyHighlight();
+        }}));
+      }}
+      document.body.appendChild(ctxMenu);
+      var r = ctxMenu.getBoundingClientRect();
+      if (r.right > window.innerWidth) ctxMenu.style.left = (e.clientX - r.width) + 'px';
+      if (r.bottom > window.innerHeight) ctxMenu.style.top = (e.clientY - r.height) + 'px';
+    }});
+  }});
+  applyHighlight();
+}})();
 </script>"#,
         css = DIFF2HTML_CSS,
         js = DIFF2HTML_JS,
@@ -1346,6 +1408,7 @@ fn run_diff2html(
   border-radius: 8px; padding: 12px 16px; margin-bottom: 6px;
 }}
 .ggv-history .commit:hover {{ border-color: {card_hover}; }}
+.ggv-history .commit.compare-first {{ border-color: #f6ad55 !important; box-shadow: 0 0 0 2px rgba(246,173,85,0.2); }}
 .ggv-history .meta {{
   display: flex; align-items: center; gap: 6px;
   margin-bottom: 5px; flex-wrap: wrap;
@@ -1476,6 +1539,66 @@ function ggvClearFilter(){{
   u.searchParams.delete('filter');
   window.location.href = u.toString();
 }}
+(function(){{
+  var KEY = 'ggv-compare-first';
+  var firstSha = localStorage.getItem(KEY);
+  var ctxMenu = null;
+  function removeMenu() {{ if (ctxMenu) {{ ctxMenu.remove(); ctxMenu = null; }} }}
+  function makeItem(label, action) {{
+    var item = document.createElement('div');
+    item.textContent = label;
+    item.style.cssText = 'padding:8px 16px;cursor:pointer;color:#e2e8f0;font-size:13px;white-space:nowrap;';
+    item.addEventListener('mouseenter', function() {{ item.style.background = '#2d3748'; }});
+    item.addEventListener('mouseleave', function() {{ item.style.background = ''; }});
+    item.addEventListener('click', function(e) {{ e.stopPropagation(); removeMenu(); action(); }});
+    return item;
+  }}
+  function makeDivider() {{
+    var d = document.createElement('div');
+    d.style.cssText = 'height:1px;background:#2d3748;margin:4px 0;';
+    return d;
+  }}
+  function applyHighlight() {{
+    document.querySelectorAll('.commit[data-hash]').forEach(function(el) {{
+      el.classList.toggle('compare-first', el.dataset.hash === firstSha);
+    }});
+  }}
+  document.addEventListener('click', removeMenu);
+  document.addEventListener('keydown', function(e) {{ if (e.key === 'Escape') removeMenu(); }});
+  document.querySelectorAll('.commit[data-hash]').forEach(function(el) {{
+    el.addEventListener('contextmenu', function(e) {{
+      e.preventDefault();
+      removeMenu();
+      var sha = el.dataset.hash;
+      ctxMenu = document.createElement('div');
+      ctxMenu.style.cssText = 'position:fixed;left:' + e.clientX + 'px;top:' + e.clientY + 'px;background:#1a1f2e;border:1px solid #2d3748;border-radius:8px;padding:4px 0;z-index:9999;min-width:210px;box-shadow:0 8px 24px rgba(0,0,0,.6);font-family:"Segoe UI",sans-serif;';
+      if (firstSha && firstSha !== sha) {{
+        ctxMenu.appendChild(makeItem('Compare with \u2026' + firstSha.slice(0, 7), function() {{
+          window.open(window.location.origin + '/diff2html?from=' + firstSha + '&to=' + sha, '_blank');
+        }}));
+        ctxMenu.appendChild(makeDivider());
+      }}
+      if (firstSha === sha) {{
+        ctxMenu.appendChild(makeItem('Deselect first commit', function() {{
+          firstSha = null;
+          localStorage.removeItem(KEY);
+          applyHighlight();
+        }}));
+      }} else {{
+        ctxMenu.appendChild(makeItem(firstSha ? 'Change first commit' : 'Select as first commit', function() {{
+          firstSha = sha;
+          localStorage.setItem(KEY, sha);
+          applyHighlight();
+        }}));
+      }}
+      document.body.appendChild(ctxMenu);
+      var r = ctxMenu.getBoundingClientRect();
+      if (r.right > window.innerWidth) ctxMenu.style.left = (e.clientX - r.width) + 'px';
+      if (r.bottom > window.innerHeight) ctxMenu.style.top = (e.clientY - r.height) + 'px';
+    }});
+  }});
+  applyHighlight();
+}})();
 </script>
 </body>
 </html>"#,
@@ -1895,7 +2018,7 @@ fn render_commit_cards(log_text: &str) -> (String, usize) {
         };
 
         cards.push_str(&format!(
-            r#"<div class="commit">
+            r#"<div class="commit" data-hash="{hash_raw}">
   <div class="meta">
     <a class="hash" href="/diff2html-single?commit={hash_raw}" title="View this commit">{hash}</a>{refs}<span class="author">{author}</span>
     <span class="time">{time}</span>
@@ -2006,6 +2129,7 @@ body {{
   border-radius: 8px; padding: 14px 18px; margin-bottom: 8px;
 }}
 .commit:hover {{ border-color: {card_hover}; }}
+.commit.compare-first {{ border-color: #f6ad55 !important; box-shadow: 0 0 0 2px rgba(246,173,85,0.2); }}
 .meta {{
   display: flex; align-items: center; gap: 6px;
   margin-bottom: 6px; flex-wrap: wrap;
@@ -2054,6 +2178,68 @@ body {{
   </div>
   {cards}
 </div>
+<script>
+(function() {{
+  var KEY = 'ggv-compare-first';
+  var firstSha = localStorage.getItem(KEY);
+  var ctxMenu = null;
+  function removeMenu() {{ if (ctxMenu) {{ ctxMenu.remove(); ctxMenu = null; }} }}
+  function makeItem(label, action) {{
+    var item = document.createElement('div');
+    item.textContent = label;
+    item.style.cssText = 'padding:8px 16px;cursor:pointer;color:#e2e8f0;font-size:13px;white-space:nowrap;';
+    item.addEventListener('mouseenter', function() {{ item.style.background = '#2d3748'; }});
+    item.addEventListener('mouseleave', function() {{ item.style.background = ''; }});
+    item.addEventListener('click', function(e) {{ e.stopPropagation(); removeMenu(); action(); }});
+    return item;
+  }}
+  function makeDivider() {{
+    var d = document.createElement('div');
+    d.style.cssText = 'height:1px;background:#2d3748;margin:4px 0;';
+    return d;
+  }}
+  function applyHighlight() {{
+    document.querySelectorAll('.commit[data-hash]').forEach(function(el) {{
+      el.classList.toggle('compare-first', el.dataset.hash === firstSha);
+    }});
+  }}
+  document.addEventListener('click', removeMenu);
+  document.addEventListener('keydown', function(e) {{ if (e.key === 'Escape') removeMenu(); }});
+  document.querySelectorAll('.commit[data-hash]').forEach(function(el) {{
+    el.addEventListener('contextmenu', function(e) {{
+      e.preventDefault();
+      removeMenu();
+      var sha = el.dataset.hash;
+      ctxMenu = document.createElement('div');
+      ctxMenu.style.cssText = 'position:fixed;left:' + e.clientX + 'px;top:' + e.clientY + 'px;background:#1a1f2e;border:1px solid #2d3748;border-radius:8px;padding:4px 0;z-index:9999;min-width:210px;box-shadow:0 8px 24px rgba(0,0,0,.6);font-family:"Segoe UI",sans-serif;';
+      if (firstSha && firstSha !== sha) {{
+        ctxMenu.appendChild(makeItem('Compare with \u2026' + firstSha.slice(0, 7), function() {{
+          window.open(window.location.origin + '/diff2html?from=' + firstSha + '&to=' + sha, '_blank');
+        }}));
+        ctxMenu.appendChild(makeDivider());
+      }}
+      if (firstSha === sha) {{
+        ctxMenu.appendChild(makeItem('Deselect first commit', function() {{
+          firstSha = null;
+          localStorage.removeItem(KEY);
+          applyHighlight();
+        }}));
+      }} else {{
+        ctxMenu.appendChild(makeItem(firstSha ? 'Change first commit' : 'Select as first commit', function() {{
+          firstSha = sha;
+          localStorage.setItem(KEY, sha);
+          applyHighlight();
+        }}));
+      }}
+      document.body.appendChild(ctxMenu);
+      var r = ctxMenu.getBoundingClientRect();
+      if (r.right > window.innerWidth) ctxMenu.style.left = (e.clientX - r.width) + 'px';
+      if (r.bottom > window.innerHeight) ctxMenu.style.top = (e.clientY - r.height) + 'px';
+    }});
+  }});
+  applyHighlight();
+}})();
+</script>
 </body>
 </html>"#,
         sha1 = sha1,
