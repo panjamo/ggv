@@ -550,12 +550,17 @@ fn handle_connection(
                 .and_then(|o| {
                     let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
                     // Take first parent if there are multiple
-                    s.split_whitespace().next().map(|p| p[..p.len().min(40)].to_string())
+                    s.split_whitespace()
+                        .next()
+                        .map(|p| p[..p.len().min(40)].to_string())
                 });
             let (sha1, sha2) = match parent {
                 Some(p) if !p.is_empty() => (p, commit),
                 // Root commit (no parent): diff against empty tree
-                _ => ("4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string(), commit),
+                _ => (
+                    "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string(),
+                    commit,
+                ),
             };
             let filter_str = params.get("filter").cloned().unwrap_or_default();
             let pathspecs = parse_pathspec(&filter_str);
@@ -568,8 +573,17 @@ fn handle_connection(
                 );
                 return;
             }
+            let older = if sha1 == "4b825dc642cb6eb9a060e54bf8d69288fbee4904" {
+                None
+            } else {
+                Some(sha1.clone())
+            };
+            let newer = find_child_commit(repo_path, &sha2);
             match run_diff2html(repo_path, &sha1, &sha2, theme, &pathspecs, &filter_str) {
-                Ok(html) => send_response(&mut stream, 200, "text/html; charset=utf-8", &html),
+                Ok(html) => {
+                    let html = inject_commit_navigation(&html, older.as_deref(), newer.as_deref());
+                    send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
+                }
                 Err(e) => send_response(&mut stream, 500, "text/plain", &e),
             }
         }
@@ -902,6 +916,134 @@ fn run_git_difftool(repo_path: &str, sha1: &str, sha2: &str) {
 
 const DIFF2HTML_JS: &str = include_str!("../assets/diff2html.min.js");
 const DIFF2HTML_CSS: &str = include_str!("../assets/diff2html.min.css");
+
+/// Find the first child commit of `commit` (i.e. newer by one step).
+/// Tries the ancestry path to HEAD first; falls back to scanning all refs.
+fn find_child_commit(repo_path: &str, commit: &str) -> Option<String> {
+    // Fast path: ancestry path to HEAD
+    let out = std::process::Command::new("git")
+        .args([
+            "-C",
+            repo_path,
+            "rev-list",
+            "--ancestry-path",
+            &format!("{commit}..HEAD"),
+        ])
+        .output()
+        .ok()?;
+    if out.status.success() {
+        let s = String::from_utf8_lossy(&out.stdout);
+        if let Some(h) = s.trim().lines().last() {
+            if !h.is_empty() {
+                return Some(h.to_string());
+            }
+        }
+    }
+    // Fallback: scan all refs for a commit whose parent list contains our hash
+    let out = std::process::Command::new("git")
+        .args(["-C", repo_path, "log", "--all", "--format=%H %P"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    for line in text.lines() {
+        let mut parts = line.split_whitespace();
+        let child_hash = parts.next()?;
+        for parent in parts {
+            if parent.starts_with(commit) || commit.starts_with(parent) {
+                return Some(child_hash.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Inject keyboard navigation (`[` = older, `]` = newer) and a floating nav bar
+/// into a diff2html-single HTML page just before `</body>`.
+fn inject_commit_navigation(html: &str, older: Option<&str>, newer: Option<&str>) -> String {
+    let older_js = older.map_or("null".to_string(), |h| format!("'{h}'"));
+    let newer_js = newer.map_or("null".to_string(), |h| format!("'{h}'"));
+
+    fn nav_btn(label: &str, href: Option<&str>, title: &str) -> String {
+        match href {
+            Some(url) => format!(
+                r#"<a href="{url}" title="{title}" style="display:inline-flex;align-items:center;gap:4px;padding:5px 10px;background:rgba(30,36,54,0.92);color:#a0aec0;border:1px solid #2d3748;border-radius:6px;font-family:monospace;font-size:12px;text-decoration:none;cursor:pointer;transition:border-color .15s;" onmouseover="this.style.borderColor='#63b3ed'" onmouseout="this.style.borderColor='#2d3748'">{label}</a>"#
+            ),
+            None => format!(
+                r#"<span style="display:inline-flex;align-items:center;gap:4px;padding:5px 10px;background:rgba(30,36,54,0.5);color:#4a5568;border:1px solid #1e2a3a;border-radius:6px;font-family:monospace;font-size:12px;">{label}</span>"#
+            ),
+        }
+    }
+
+    let older_url = older.map(|h| format!("/diff2html-single?commit={h}"));
+    let newer_url = newer.map(|h| format!("/diff2html-single?commit={h}"));
+    let btn_older = nav_btn("[ ← older", older_url.as_deref(), "Older commit  [");
+    let btn_newer = nav_btn("newer → ]", newer_url.as_deref(), "Newer commit  ]");
+
+    let injection = format!(
+        r#"<div style="position:fixed;bottom:16px;right:16px;display:flex;gap:6px;z-index:9999;">
+  {btn_older}{btn_newer}
+  <button onclick="ggvToggleHelp()" title="Keyboard shortcuts  ?" style="display:inline-flex;align-items:center;padding:5px 10px;background:rgba(30,36,54,0.92);color:#a0aec0;border:1px solid #2d3748;border-radius:6px;font-family:monospace;font-size:12px;cursor:pointer;" onmouseover="this.style.borderColor='#63b3ed'" onmouseout="this.style.borderColor='#2d3748'">?</button>
+</div>
+<div id="ggv-help-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10000;align-items:center;justify-content:center;">
+  <div style="background:#1a1f2e;border:1px solid #2d3748;border-radius:12px;padding:28px 32px;min-width:320px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;box-shadow:0 16px 48px rgba(0,0,0,.7);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+      <span style="color:#e2e8f0;font-size:15px;font-weight:600;">Keyboard Shortcuts</span>
+      <button onclick="ggvToggleHelp()" style="background:none;border:none;color:#718096;font-size:18px;cursor:pointer;line-height:1;">&#x2715;</button>
+    </div>
+    <table style="border-collapse:collapse;width:100%;color:#e2e8f0;font-size:13px;">
+      <tr><td style="padding:6px 0;color:#718096;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;" colspan="2">Navigation</td></tr>
+      <tr>
+        <td style="padding:5px 0;width:80px;"><kbd style="background:#2d3748;color:#a0aec0;border:1px solid #4a5568;border-radius:4px;padding:2px 8px;font-family:monospace;font-size:12px;">[</kbd></td>
+        <td style="padding:5px 0;color:#cbd5e1;">Older commit (parent)</td>
+      </tr>
+      <tr>
+        <td style="padding:5px 0;"><kbd style="background:#2d3748;color:#a0aec0;border:1px solid #4a5568;border-radius:4px;padding:2px 8px;font-family:monospace;font-size:12px;">]</kbd></td>
+        <td style="padding:5px 0;color:#cbd5e1;">Newer commit (child)</td>
+      </tr>
+      <tr><td style="padding:10px 0 6px;color:#718096;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;" colspan="2">Files</td></tr>
+      <tr>
+        <td style="padding:5px 0;"><kbd style="background:#2d3748;color:#a0aec0;border:1px solid #4a5568;border-radius:4px;padding:2px 8px;font-family:monospace;font-size:12px;">Enter</kbd></td>
+        <td style="padding:5px 0;color:#cbd5e1;">Apply file filter</td>
+      </tr>
+      <tr><td style="padding:10px 0 6px;color:#718096;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;" colspan="2">General</td></tr>
+      <tr>
+        <td style="padding:5px 0;"><kbd style="background:#2d3748;color:#a0aec0;border:1px solid #4a5568;border-radius:4px;padding:2px 8px;font-family:monospace;font-size:12px;">?</kbd></td>
+        <td style="padding:5px 0;color:#cbd5e1;">Toggle this help</td>
+      </tr>
+      <tr>
+        <td style="padding:5px 0;"><kbd style="background:#2d3748;color:#a0aec0;border:1px solid #4a5568;border-radius:4px;padding:2px 8px;font-family:monospace;font-size:12px;">Esc</kbd></td>
+        <td style="padding:5px 0;color:#cbd5e1;">Close this help</td>
+      </tr>
+    </table>
+  </div>
+</div>
+<script>
+(function(){{
+  var older = {older_js};
+  var newer = {newer_js};
+  var overlay = document.getElementById('ggv-help-overlay');
+  window.ggvToggleHelp = function() {{
+    var visible = overlay.style.display === 'flex';
+    overlay.style.display = visible ? 'none' : 'flex';
+  }};
+  overlay.addEventListener('click', function(e) {{
+    if (e.target === overlay) overlay.style.display = 'none';
+  }});
+  document.addEventListener('keydown', function(e) {{
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === '?') {{ ggvToggleHelp(); return; }}
+    if (e.key === 'Escape') {{ overlay.style.display = 'none'; return; }}
+    if (overlay.style.display === 'flex') return;
+    if (e.key === '[' && older) {{ window.location.href = '/diff2html-single?commit=' + older; }}
+    if (e.key === ']' && newer) {{ window.location.href = '/diff2html-single?commit=' + newer; }}
+  }});
+}})();
+</script>
+</body>"#
+    );
+
+    html.replacen("</body>", &injection, 1)
+}
 
 /// Encode an arbitrary string as a JSON string literal (including surrounding quotes).
 /// Also escapes `</` as `<\/` so that `</script>` inside the value cannot terminate
