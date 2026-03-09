@@ -115,4 +115,12 @@ pub struct Args {
         default_value_t = true
     )]
     pub gia_audio: bool,
+
+    #[arg(
+        short = 'M',
+        long,
+        help = "Maximum number of changed files to show in the diff view; if exceeded only the commit list is shown (0 = unlimited)",
+        default_value_t = 100
+    )]
+    pub max_diff_files: usize,
 }

@@ -81,6 +81,7 @@ fn main() -> Result<()> {
             args.gia_audio,
             args.theme,
             Some(regen),
+            args.max_diff_files,
         )
         .context("Failed to start diff web server")?;
         (Some(handle), Some(web_server::base_url(port)))

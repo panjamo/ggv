@@ -138,6 +138,7 @@ pub fn start(
     gia_audio: bool,
     theme: Theme,
     mut regen: Option<RegenerateConfig>,
+    max_diff_files: usize,
 ) -> anyhow::Result<(std::thread::JoinHandle<()>, u16)> {
     let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
     let listener = TcpListener::bind(addr)?;
@@ -173,7 +174,16 @@ pub fn start(
 
     let handle = std::thread::spawn(move || {
         run_server(
-            listener, &repo_path, &svg_path, prompt, &lang, gia_audio, theme, regen, last_hb,
+            listener,
+            &repo_path,
+            &svg_path,
+            prompt,
+            &lang,
+            gia_audio,
+            theme,
+            regen,
+            last_hb,
+            max_diff_files,
         )
     });
     Ok((handle, actual_port))
@@ -189,6 +199,7 @@ fn run_server(
     theme: Theme,
     regen: Option<Arc<RegenerateConfig>>,
     last_hb: Arc<AtomicU64>,
+    max_diff_files: usize,
 ) {
     for stream in listener.incoming() {
         match stream {
@@ -210,6 +221,7 @@ fn run_server(
                         theme,
                         regen_clone,
                         last_hb_clone,
+                        max_diff_files,
                     )
                 });
             }
@@ -228,6 +240,7 @@ fn handle_connection(
     theme: Theme,
     regen: Option<Arc<RegenerateConfig>>,
     last_hb: Arc<AtomicU64>,
+    max_diff_files: usize,
 ) {
     let reader = BufReader::new(match stream.try_clone() {
         Ok(s) => s,
@@ -402,8 +415,16 @@ fn handle_connection(
                 );
                 return;
             }
-            let diff_section =
-                diff2html_section(repo_path, &sha1, &sha2, theme, &pathspecs, &filter_str).ok();
+            let diff_section = diff2html_section(
+                repo_path,
+                &sha1,
+                &sha2,
+                theme,
+                &pathspecs,
+                &filter_str,
+                max_diff_files,
+            )
+            .ok();
             let html = build_html(
                 &sha1[..sha1.len().min(7)],
                 &sha2[..sha2.len().min(7)],
@@ -457,8 +478,16 @@ fn handle_connection(
                 );
                 return;
             }
-            let diff_section =
-                diff2html_section(repo_path, &sha1, &sha2, theme, &pathspecs, &filter_str).ok();
+            let diff_section = diff2html_section(
+                repo_path,
+                &sha1,
+                &sha2,
+                theme,
+                &pathspecs,
+                &filter_str,
+                max_diff_files,
+            )
+            .ok();
             let html = build_html(
                 &sha1[..sha1.len().min(7)],
                 &sha2[..sha2.len().min(7)],
@@ -523,7 +552,15 @@ fn handle_connection(
                 );
                 return;
             }
-            match run_diff2html(repo_path, &sha1, &sha2, theme, &pathspecs, &filter_str) {
+            match run_diff2html(
+                repo_path,
+                &sha1,
+                &sha2,
+                theme,
+                &pathspecs,
+                &filter_str,
+                max_diff_files,
+            ) {
                 Ok(html) => send_response(&mut stream, 200, "text/html; charset=utf-8", &html),
                 Err(e) => send_response(&mut stream, 500, "text/plain", &e),
             }
@@ -579,7 +616,15 @@ fn handle_connection(
                 Some(sha1.clone())
             };
             let newer = find_child_commit(repo_path, &sha2);
-            match run_diff2html(repo_path, &sha1, &sha2, theme, &pathspecs, &filter_str) {
+            match run_diff2html(
+                repo_path,
+                &sha1,
+                &sha2,
+                theme,
+                &pathspecs,
+                &filter_str,
+                max_diff_files,
+            ) {
                 Ok(html) => {
                     let html = inject_commit_navigation(&html, older.as_deref(), newer.as_deref());
                     send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
@@ -1087,6 +1132,7 @@ fn diff2html_section(
     theme: Theme,
     pathspecs: &[String],
     filter_str: &str,
+    max_diff_files: usize,
 ) -> Result<String, String> {
     let sha1_is_ancestor = std::process::Command::new("git")
         .args(["-C", repo_path, "merge-base", "--is-ancestor", sha1, sha2])
@@ -1098,6 +1144,25 @@ fn diff2html_section(
     } else {
         (sha2, sha1)
     };
+
+    // Count changed files before fetching the full diff
+    if max_diff_files > 0 {
+        let mut name_cmd = std::process::Command::new("git");
+        name_cmd.args(["-C", repo_path, "diff", "--name-only", "-w", older, newer]);
+        if !pathspecs.is_empty() {
+            name_cmd.arg("--");
+            name_cmd.args(pathspecs);
+        }
+        let file_count = name_cmd
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).lines().count())
+            .unwrap_or(0);
+        if file_count > max_diff_files {
+            return Err(format!(
+                "Too many changed files ({file_count} > {max_diff_files}); diff suppressed"
+            ));
+        }
+    }
 
     let mut diff_cmd = std::process::Command::new("git");
     diff_cmd.args(["-C", repo_path, "diff", "-w", older, newer]);
@@ -1419,6 +1484,7 @@ fn run_diff2html(
     theme: Theme,
     pathspecs: &[String],
     filter_str: &str,
+    max_diff_files: usize,
 ) -> Result<String, String> {
     // Determine chronological order so we always diff older → newer
     let sha1_is_ancestor = std::process::Command::new("git")
@@ -1432,16 +1498,41 @@ fn run_diff2html(
         (sha2, sha1)
     };
 
-    let mut diff_cmd = std::process::Command::new("git");
-    diff_cmd.args(["-C", repo_path, "diff", "-w", older, newer]);
-    if !pathspecs.is_empty() {
-        diff_cmd.arg("--");
-        diff_cmd.args(pathspecs);
-    }
-    let diff_bytes = diff_cmd
-        .output()
-        .map_err(|e| format!("git diff failed: {e}"))?
-        .stdout;
+    // Count changed files; skip the full diff if the limit is exceeded.
+    let suppressed_file_count: Option<usize> = if max_diff_files > 0 {
+        let mut name_cmd = std::process::Command::new("git");
+        name_cmd.args(["-C", repo_path, "diff", "--name-only", "-w", older, newer]);
+        if !pathspecs.is_empty() {
+            name_cmd.arg("--");
+            name_cmd.args(pathspecs);
+        }
+        let file_count = name_cmd
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).lines().count())
+            .unwrap_or(0);
+        if file_count > max_diff_files {
+            Some(file_count)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let diff_bytes = if suppressed_file_count.is_none() {
+        let mut diff_cmd = std::process::Command::new("git");
+        diff_cmd.args(["-C", repo_path, "diff", "-w", older, newer]);
+        if !pathspecs.is_empty() {
+            diff_cmd.arg("--");
+            diff_cmd.args(pathspecs);
+        }
+        diff_cmd
+            .output()
+            .map_err(|e| format!("git diff failed: {e}"))?
+            .stdout
+    } else {
+        vec![]
+    };
 
     // Fetch commit log for the history section.
     // Use the merge base as the exclusion anchor so commits from both sides of a
@@ -1481,6 +1572,7 @@ fn run_diff2html(
     let s2 = &sha2[..sha2.len().min(7)];
     let diff_json = to_json_string(&raw_diff);
     let filter_json = to_json_string(filter_str);
+    let show_diff = suppressed_file_count.is_none();
 
     // Theme palette for the commit history section
     let (
@@ -1516,6 +1608,76 @@ fn run_diff2html(
             "#f1f5f9", "#64748b", "#eff6ff", "#1d4ed8", "#fef3c7", "#92400e", "#eff6ff", "#1e40af",
             "#ecfdf5", "#065f46", "#fdf4ff", "#7e22ce", "#e2e8f0",
         ),
+    };
+
+    // Build the filter-bar + diff section conditionally so we don't include the
+    // diff2html library or run `git diff` output when the file limit is exceeded.
+    let diff_bundle = if show_diff {
+        format!(
+            r#"<div class="ggv-filter-bar">
+  <span class="ggv-flt-label">File filter:</span>
+  <input id="ggv-flt" class="ggv-flt-input" type="text" placeholder="*.cpp *.h  or  src/ *.cs">
+  <button class="ggv-flt-btn" onclick="ggvApplyFilter()">Apply</button>
+  <button class="ggv-flt-btn" onclick="ggvClearFilter()">Clear</button>
+</div>
+<div class="ggv-diff">
+<div id="diff"></div>
+</div>
+<script>{js}</script>
+<script>
+document.getElementById('diff').innerHTML =
+  Diff2Html.html({diff_json}, {{
+    drawFileList: true,
+    matching: 'lines',
+    outputFormat: 'side-by-side'
+  }});
+document.querySelectorAll('.d2h-file-wrapper').forEach(function(wrapper) {{
+  var header = wrapper.querySelector('.d2h-file-header');
+  var body = header && header.nextElementSibling;
+  if (!header || !body) return;
+  body.classList.add('ggv-file-body');
+  var arrow = document.createElement('span');
+  arrow.className = 'ggv-toggle';
+  arrow.textContent = '\u25bc';
+  header.appendChild(arrow);
+  header.addEventListener('click', function() {{
+    var collapsed = body.classList.toggle('ggv-collapsed');
+    header.classList.toggle('ggv-collapsed', collapsed);
+  }});
+}});
+(function(){{
+  var inp = document.getElementById('ggv-flt');
+  var active = {filter_json};
+  inp.value = active || localStorage.getItem('ggv-diff-filter') || '';
+  inp.addEventListener('keydown', function(e){{ if(e.key==='Enter') ggvApplyFilter(); }});
+}})();
+function ggvApplyFilter(){{
+  var v = document.getElementById('ggv-flt').value.trim();
+  if (v) localStorage.setItem('ggv-diff-filter', v);
+  else localStorage.removeItem('ggv-diff-filter');
+  var u = new URL(window.location.href);
+  if(v){{ u.searchParams.set('filter',v); }} else {{ u.searchParams.delete('filter'); }}
+  window.location.href = u.toString();
+}}
+function ggvClearFilter(){{
+  localStorage.removeItem('ggv-diff-filter');
+  var u = new URL(window.location.href);
+  u.searchParams.delete('filter');
+  window.location.href = u.toString();
+}}
+</script>"#,
+            js = DIFF2HTML_JS,
+            diff_json = diff_json,
+            filter_json = filter_json,
+        )
+    } else {
+        let file_count = suppressed_file_count.unwrap_or(0);
+        format!(
+            r#"<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:24px 32px;font-size:13px;color:#f6ad55;background:#2d1a00;border:1px solid #744210;border-radius:8px;margin:24px auto;max-width:800px;">
+  &#9888; Diff suppressed: <strong>{file_count} files</strong> changed, which exceeds the limit of <strong>{max_diff_files}</strong>.
+  Use <code>-M &lt;number&gt;</code> to increase the limit, or <code>-M 0</code> to disable it.
+</div>"#
+        )
     };
 
     let html = format!(
@@ -1618,12 +1780,7 @@ fn run_diff2html(
 </style>
 </head>
 <body>
-<div class="ggv-filter-bar">
-  <span class="ggv-flt-label">File filter:</span>
-  <input id="ggv-flt" class="ggv-flt-input" type="text" placeholder="*.cpp *.h  or  src/ *.cs">
-  <button class="ggv-flt-btn" onclick="ggvApplyFilter()">Apply</button>
-  <button class="ggv-flt-btn" onclick="ggvClearFilter()">Clear</button>
-</div>
+{diff_bundle}
 <div class="ggv-history">
   <div class="page">
     <div class="hdr">
@@ -1636,51 +1793,7 @@ fn run_diff2html(
     {commit_cards}
   </div>
 </div>
-<div class="ggv-diff">
-<div id="diff"></div>
-</div>
-<script>{js}</script>
 <script>
-document.getElementById('diff').innerHTML =
-  Diff2Html.html({diff_json}, {{
-    drawFileList: true,
-    matching: 'lines',
-    outputFormat: 'side-by-side'
-  }});
-document.querySelectorAll('.d2h-file-wrapper').forEach(function(wrapper) {{
-  var header = wrapper.querySelector('.d2h-file-header');
-  var body = header && header.nextElementSibling;
-  if (!header || !body) return;
-  body.classList.add('ggv-file-body');
-  var arrow = document.createElement('span');
-  arrow.className = 'ggv-toggle';
-  arrow.textContent = '\u25bc';
-  header.appendChild(arrow);
-  header.addEventListener('click', function() {{
-    var collapsed = body.classList.toggle('ggv-collapsed');
-    header.classList.toggle('ggv-collapsed', collapsed);
-  }});
-}});
-(function(){{
-  var inp = document.getElementById('ggv-flt');
-  var active = {filter_json};
-  inp.value = active || localStorage.getItem('ggv-diff-filter') || '';
-  inp.addEventListener('keydown', function(e){{ if(e.key==='Enter') ggvApplyFilter(); }});
-}})();
-function ggvApplyFilter(){{
-  var v = document.getElementById('ggv-flt').value.trim();
-  if (v) localStorage.setItem('ggv-diff-filter', v);
-  else localStorage.removeItem('ggv-diff-filter');
-  var u = new URL(window.location.href);
-  if(v){{ u.searchParams.set('filter',v); }} else {{ u.searchParams.delete('filter'); }}
-  window.location.href = u.toString();
-}}
-function ggvClearFilter(){{
-  localStorage.removeItem('ggv-diff-filter');
-  var u = new URL(window.location.href);
-  u.searchParams.delete('filter');
-  window.location.href = u.toString();
-}}
 (function(){{
   var KEY = 'ggv-compare-first';
   var firstSha = localStorage.getItem(KEY);
@@ -1745,11 +1858,9 @@ function ggvClearFilter(){{
 </body>
 </html>"#,
         css = DIFF2HTML_CSS,
-        js = DIFF2HTML_JS,
         s1 = s1,
         s2 = s2,
-        diff_json = diff_json,
-        filter_json = filter_json,
+        diff_bundle = diff_bundle,
         commit_cards = commit_cards,
         count_label = count_label,
     );
