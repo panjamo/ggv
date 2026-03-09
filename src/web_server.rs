@@ -1186,21 +1186,21 @@ fn diff2html_section(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
     let exclude_base = format!("^{}", merge_base.as_deref().unwrap_or(older));
+    let log_range = [exclude_base.as_str(), sha1, sha2];
     let log_text = std::process::Command::new("git")
         .args([
             "-C",
             repo_path,
             "log",
             "--pretty=format:### %h, %an, %ar, %D%n%n%s%n%b%n",
-            &exclude_base,
-            sha1,
-            sha2,
         ])
+        .args(log_range)
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default();
 
-    let (commit_cards, commit_count) = render_commit_cards(&log_text);
+    let file_counts = batch_file_counts(repo_path, &log_range);
+    let (commit_cards, commit_count) = render_commit_cards(&file_counts, &log_text);
     let count_label = if commit_count == 1 {
         "1 commit".to_string()
     } else {
@@ -1331,6 +1331,7 @@ fn diff2html_section(
   padding: 1px 5px; border-radius: 3px; font-size: 11px;
 }}
 .ggv-history .empty {{ color: {dim}; font-size: 13px; padding: 20px 0; }}
+.ggv-history .file-count {{ font-size: 11px; color: {dim}; white-space: nowrap; }}
 /* ── diff2html section ── */
 {css}
 .ggv-diff {{ padding: 16px; max-width: 1200px; margin: 0 auto; background: #fff; color: #24292e; }}
@@ -1546,21 +1547,21 @@ fn run_diff2html(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
     let exclude_base = format!("^{}", merge_base.as_deref().unwrap_or(older));
+    let log_range = [exclude_base.as_str(), sha1, sha2];
     let log_text = std::process::Command::new("git")
         .args([
             "-C",
             repo_path,
             "log",
             "--pretty=format:### %h, %an, %ar, %D%n%n%s%n%b%n",
-            &exclude_base,
-            sha1,
-            sha2,
         ])
+        .args(log_range)
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default();
 
-    let (commit_cards, commit_count) = render_commit_cards(&log_text);
+    let file_counts = batch_file_counts(repo_path, &log_range);
+    let (commit_cards, commit_count) = render_commit_cards(&file_counts, &log_text);
     let count_label = if commit_count == 1 {
         "1 commit".to_string()
     } else {
@@ -1610,17 +1611,17 @@ fn run_diff2html(
         ),
     };
 
-    // Build the filter-bar + diff section conditionally so we don't include the
-    // diff2html library or run `git diff` output when the file limit is exceeded.
-    let diff_bundle = if show_diff {
-        format!(
-            r#"<div class="ggv-filter-bar">
+    // Build the filter bar (top) and diff section (below commit list) conditionally.
+    // When the file limit is exceeded we skip the diff2html library and the git diff output.
+    let (diff_filter_bar, diff_section) = if show_diff {
+        let filter_bar = r#"<div class="ggv-filter-bar">
   <span class="ggv-flt-label">File filter:</span>
   <input id="ggv-flt" class="ggv-flt-input" type="text" placeholder="*.cpp *.h  or  src/ *.cs">
   <button class="ggv-flt-btn" onclick="ggvApplyFilter()">Apply</button>
   <button class="ggv-flt-btn" onclick="ggvClearFilter()">Clear</button>
-</div>
-<div class="ggv-diff">
+</div>"#.to_string();
+        let section = format!(
+            r#"<div class="ggv-diff">
 <div id="diff"></div>
 </div>
 <script>{js}</script>
@@ -1669,15 +1670,17 @@ function ggvClearFilter(){{
             js = DIFF2HTML_JS,
             diff_json = diff_json,
             filter_json = filter_json,
-        )
+        );
+        (filter_bar, section)
     } else {
         let file_count = suppressed_file_count.unwrap_or(0);
-        format!(
+        let notice = format!(
             r#"<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:24px 32px;font-size:13px;color:#f6ad55;background:#2d1a00;border:1px solid #744210;border-radius:8px;margin:24px auto;max-width:800px;">
   &#9888; Diff suppressed: <strong>{file_count} files</strong> changed, which exceeds the limit of <strong>{max_diff_files}</strong>.
   Use <code>-M &lt;number&gt;</code> to increase the limit, or <code>-M 0</code> to disable it.
 </div>"#
-        )
+        );
+        (String::new(), notice)
     };
 
     let html = format!(
@@ -1748,6 +1751,7 @@ function ggvClearFilter(){{
   padding: 1px 5px; border-radius: 3px; font-size: 11px;
 }}
 .ggv-history .empty {{ color: {dim}; font-size: 13px; padding: 20px 0; }}
+.ggv-history .file-count {{ font-size: 11px; color: {dim}; white-space: nowrap; }}
 /* ── diff2html section ── */
 {css}
 .ggv-diff {{ padding: 16px; max-width: 1200px; margin: 0 auto; }}
@@ -1780,7 +1784,7 @@ function ggvClearFilter(){{
 </style>
 </head>
 <body>
-{diff_bundle}
+{diff_filter_bar}
 <div class="ggv-history">
   <div class="page">
     <div class="hdr">
@@ -1793,6 +1797,7 @@ function ggvClearFilter(){{
     {commit_cards}
   </div>
 </div>
+{diff_section}
 <script>
 (function(){{
   var KEY = 'ggv-compare-first';
@@ -1860,7 +1865,8 @@ function ggvClearFilter(){{
         css = DIFF2HTML_CSS,
         s1 = s1,
         s2 = s2,
-        diff_bundle = diff_bundle,
+        diff_filter_bar = diff_filter_bar,
+        diff_section = diff_section,
         commit_cards = commit_cards,
         count_label = count_label,
     );
@@ -2180,6 +2186,7 @@ fn serve_git_log(repo_path: &str, sha1: &str, sha2: &str, theme: Theme) -> Strin
 
     let text = String::from_utf8_lossy(&out.stdout).to_string();
     build_log_html(
+        repo_path,
         &sha1[..sha1.len().min(7)],
         &sha2[..sha2.len().min(7)],
         &text,
@@ -2216,7 +2223,38 @@ fn render_ref_badges(refs_str: &str) -> String {
 
 /// Parses a git log text (format: `### hash, author, rel_time[, refs]\n\nsubject\nbody`)
 /// into styled HTML commit cards. Returns (cards_html, count).
-fn render_commit_cards(log_text: &str) -> (String, usize) {
+/// Returns a map from short commit hash (as it appears in %h log output) → number of changed files.
+/// Uses a single `git log --name-only` call over the given revision range.
+fn batch_file_counts(repo_path: &str, range_args: &[&str]) -> std::collections::HashMap<String, usize> {
+    let mut cmd = std::process::Command::new("git");
+    cmd.args(["-C", repo_path, "log", "--format=COMMIT %h", "--name-only"]);
+    cmd.args(range_args);
+    let out = match cmd.output() {
+        Ok(o) => o,
+        Err(_) => return Default::default(),
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut map = std::collections::HashMap::new();
+    let mut current_hash: Option<String> = None;
+    let mut file_count = 0usize;
+    for line in text.lines() {
+        if let Some(hash) = line.strip_prefix("COMMIT ") {
+            if let Some(h) = current_hash.take() {
+                map.insert(h, file_count);
+            }
+            current_hash = Some(hash.to_string());
+            file_count = 0;
+        } else if !line.trim().is_empty() {
+            file_count += 1;
+        }
+    }
+    if let Some(h) = current_hash {
+        map.insert(h, file_count);
+    }
+    map
+}
+
+fn render_commit_cards(file_counts: &std::collections::HashMap<String, usize>, log_text: &str) -> (String, usize) {
     let stripped = log_text.trim_start_matches("### ");
     let raw_commits: Vec<&str> = stripped.split("\n### ").collect();
 
@@ -2270,11 +2308,18 @@ fn render_commit_cards(log_text: &str) -> (String, usize) {
             )
         };
 
+        let file_count = file_counts.get(hash).copied().unwrap_or(0);
+        let file_badge = if file_count == 1 {
+            r#" <span class="file-count">1 file</span>"#.to_string()
+        } else {
+            format!(r#" <span class="file-count">{file_count} files</span>"#)
+        };
+
         cards.push_str(&format!(
             r#"<div class="commit" data-hash="{hash_raw}">
   <div class="meta">
     <a class="hash" href="/diff2html-single?commit={hash_raw}" title="View this commit">{hash}</a>{refs}<span class="author">{author}</span>
-    <span class="time">{time}</span>
+    <span class="time">{time}</span>{file_badge}
   </div>
   <div class="subject">{subject}</div>{body}
 </div>"#,
@@ -2287,6 +2332,7 @@ fn render_commit_cards(log_text: &str) -> (String, usize) {
             },
             author = html_escape(author),
             time = html_escape(rel_time),
+            file_badge = file_badge,
             subject = html_escape(&subject),
             body = if body_html.is_empty() {
                 String::new()
@@ -2304,8 +2350,9 @@ fn render_commit_cards(log_text: &str) -> (String, usize) {
     (cards, count)
 }
 
-fn build_log_html(sha1: &str, sha2: &str, log_text: &str, theme: Theme) -> String {
-    let (cards, count) = render_commit_cards(log_text);
+fn build_log_html(repo_path: &str, sha1: &str, sha2: &str, log_text: &str, theme: Theme) -> String {
+    let file_counts = batch_file_counts(repo_path, &[&format!("^{sha1}"), sha2]);
+    let (cards, count) = render_commit_cards(&file_counts, log_text);
 
     let count_label = if count == 1 {
         "1 commit".to_string()
@@ -2418,6 +2465,7 @@ body {{
   padding: 1px 5px; border-radius: 3px; font-size: 11px;
 }}
 .empty {{ color: {dim}; font-size: 14px; text-align: center; padding: 40px; }}
+.file-count {{ font-size: 11px; color: {dim}; white-space: nowrap; }}
 </style>
 </head>
 <body>
