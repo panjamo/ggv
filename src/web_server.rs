@@ -129,6 +129,7 @@ const HEARTBEAT_TIMEOUT_SECS: u64 = 300;
 /// Interval at which the watchdog checks the heartbeat timestamp.
 const WATCHDOG_INTERVAL_SECS: u64 = 10;
 
+#[allow(clippy::too_many_arguments)]
 pub fn start(
     port: u16,
     repo_path: String,
@@ -189,6 +190,7 @@ pub fn start(
     Ok((handle, actual_port))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_server(
     listener: TcpListener,
     repo_path: &str,
@@ -230,6 +232,7 @@ fn run_server(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_connection(
     mut stream: TcpStream,
     repo_path: &str,
@@ -1619,7 +1622,8 @@ fn run_diff2html(
   <input id="ggv-flt" class="ggv-flt-input" type="text" placeholder="*.cpp *.h  or  src/ *.cs">
   <button class="ggv-flt-btn" onclick="ggvApplyFilter()">Apply</button>
   <button class="ggv-flt-btn" onclick="ggvClearFilter()">Clear</button>
-</div>"#.to_string();
+</div>"#
+            .to_string();
         let section = format!(
             r#"<div class="ggv-diff">
 <div id="diff"></div>
@@ -2199,11 +2203,11 @@ fn render_ref_badge(r: &str) -> String {
     if r.is_empty() {
         return String::new();
     }
-    if r.starts_with("HEAD -> ") {
-        let branch = html_escape(&r["HEAD -> ".len()..]);
+    if let Some(stripped) = r.strip_prefix("HEAD -> ") {
+        let branch = html_escape(stripped);
         format!(r#"<span class="ref-head">HEAD</span><span class="ref-branch">{branch}</span>"#)
-    } else if r.starts_with("tag: ") {
-        let tag = html_escape(&r["tag: ".len()..]);
+    } else if let Some(stripped) = r.strip_prefix("tag: ") {
+        let tag = html_escape(stripped);
         format!(r#"<span class="ref-tag">{tag}</span>"#)
     } else if r.contains('/') {
         format!(r#"<span class="ref-remote">{}</span>"#, html_escape(r))
@@ -2225,7 +2229,10 @@ fn render_ref_badges(refs_str: &str) -> String {
 /// into styled HTML commit cards. Returns (cards_html, count).
 /// Returns a map from short commit hash (as it appears in %h log output) → number of changed files.
 /// Uses a single `git log --name-only` call over the given revision range.
-fn batch_file_counts(repo_path: &str, range_args: &[&str]) -> std::collections::HashMap<String, usize> {
+fn batch_file_counts(
+    repo_path: &str,
+    range_args: &[&str],
+) -> std::collections::HashMap<String, usize> {
     let mut cmd = std::process::Command::new("git");
     cmd.args(["-C", repo_path, "log", "--format=COMMIT %h", "--name-only"]);
     cmd.args(range_args);
@@ -2254,7 +2261,10 @@ fn batch_file_counts(repo_path: &str, range_args: &[&str]) -> std::collections::
     map
 }
 
-fn render_commit_cards(file_counts: &std::collections::HashMap<String, usize>, log_text: &str) -> (String, usize) {
+fn render_commit_cards(
+    file_counts: &std::collections::HashMap<String, usize>,
+    log_text: &str,
+) -> (String, usize) {
     let stripped = log_text.trim_start_matches("### ");
     let raw_commits: Vec<&str> = stripped.split("\n### ").collect();
 

@@ -22,6 +22,7 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **Smart AI Diff**: AI summaries use merge-base detection to produce the correct snapshot diff (`git diff`) enriched with structured commit metadata (`git log`) passed to gia as additional context; a "diff-only" variant skips the log metadata for a more focused summary
 - **Multilingual AI Output**: AI summaries are delivered in a configurable language (`-l`/`--lang`, e.g. `de-DE`, `en-US`, `fr-FR`); German is the default
 - **Rendered AI Output**: AI diff summaries are rendered as a styled HTML page in the browser — gia outputs Markdown which is converted to HTML on the fly; below the summary the page shows a commit history card list and a full side-by-side diff (via diff2html, embedded inline — no CDN required), with collapsible file sections
+- **Diff File Limit**: The side-by-side diff is suppressed when the number of changed files exceeds a configurable threshold (`-M`, default 100); commit cards with per-commit file counts are always shown; set `-M 0` to disable the limit
 - **Audio Input**: Microphone recording in gia is active by default; the voice input is treated as a filter or direction — e.g. "ignore test files" or "focus only on the API changes" — and is appended to the AI prompt; pass `-N` to disable
 - **Cross-Platform**: Works on Windows, macOS, and Linux
 
@@ -87,6 +88,7 @@ Options:
   -p, --gia-prompt <TEXT>   Custom prompt passed to gia (overrides built-in default)
   -l, --lang <LOCALE>       Language locale for AI output (e.g. de-DE, en-US, fr-FR) [default: de-DE]
   -N, --no-gia-audio        Deactivate microphone audio recording in gia
+  -M, --max-diff-files <N>  Max changed files to render in diff view; if exceeded only commit list is shown (0 = unlimited) [default: 100]
   -h, --help                Print help
   -V, --version             Print version
 ```
@@ -204,6 +206,13 @@ Deactivate audio input — gia will not record from the microphone:
 
 ```bash
 ggv -N
+```
+
+Raise the diff file limit to 500 files (or disable it entirely):
+
+```bash
+ggv -M 500
+ggv -M 0
 ```
 
 Combined:
