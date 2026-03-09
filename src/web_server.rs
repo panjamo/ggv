@@ -702,6 +702,117 @@ fn serve_svg(stream: &mut TcpStream, svg_path: &str, repo_name: &str) {
   <button onclick="ggvSave()" style="padding:2px 8px;border-radius:4px;cursor:pointer;border:1px solid #2d3748;background:#1a1f2e;color:#e2e8f0;font-size:11px;">Set</button>
   <button onclick="ggvClear()" style="padding:2px 8px;border-radius:4px;cursor:pointer;border:1px solid #2d3748;background:#1a1f2e;color:#718096;font-size:11px;">✕</button>
   <span id="ggv-flt-ind" style="color:#f6ad55;font-size:10px;display:none;">●</span>
+  <button onclick="ggvHelp()" title="Help  ?" style="padding:2px 8px;border-radius:4px;cursor:pointer;border:1px solid #2d3748;background:#1a1f2e;color:#a0aec0;font-size:12px;font-family:monospace;line-height:1.4;" onmouseover="this.style.borderColor='#63b3ed';this.style.color='#63b3ed'" onmouseout="this.style.borderColor='#2d3748';this.style.color='#a0aec0'">?</button>
+</div>
+<!-- ── Help overlay ── -->
+<div id="ggv-help-overlay" onclick="if(event.target===this)ggvHelp()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:10000;align-items:flex-start;justify-content:center;padding:24px 16px;overflow-y:auto;">
+  <div style="background:#1a1f2e;border:1px solid #2d3748;border-radius:14px;padding:28px 32px;width:100%;max-width:660px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;box-shadow:0 20px 60px rgba(0,0,0,.8);color:#e2e8f0;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;">
+      <span style="font-size:16px;font-weight:700;color:#63b3ed;">&#9432; GGV Help</span>
+      <button onclick="ggvHelp()" style="background:none;border:none;color:#718096;font-size:20px;cursor:pointer;line-height:1;padding:0 4px;">&#x2715;</button>
+    </div>
+
+    <!-- Edge labels -->
+    <div style="margin-bottom:18px;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4a5568;margin-bottom:10px;">Edge Labels (blue numbers on arrows)</div>
+      <table style="border-collapse:collapse;width:100%;font-size:13px;">
+        <tr><td style="padding:4px 0 4px 0;width:56%;color:#a0aec0;">Number value</td><td style="padding:4px 0;color:#cbd5e1;">Number of commits condensed into that edge</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Font size</td><td style="padding:4px 0;color:#cbd5e1;">Proportional to the number of changed files in that range</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Hover edge label</td><td style="padding:4px 0;color:#cbd5e1;">Tooltip listing the changed files</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Left-click edge label</td><td style="padding:4px 0;color:#cbd5e1;">Opens <code style="background:#2d3748;border-radius:3px;padding:1px 5px;font-size:11px;">git difftool</code> for that range</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Right-click edge label</td><td style="padding:4px 0;color:#cbd5e1;">Context menu: AI diff+log, AI diff-only, AI log-only</td></tr>
+      </table>
+    </div>
+
+    <!-- Edges -->
+    <div style="margin-bottom:18px;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4a5568;margin-bottom:10px;">Edges (arrows between commits)</div>
+      <table style="border-collapse:collapse;width:100%;font-size:13px;">
+        <tr><td style="padding:4px 0;width:56%;color:#a0aec0;">Hover edge</td><td style="padding:4px 0;color:#cbd5e1;">Tooltip listing all commits condensed into that range</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Click edge</td><td style="padding:4px 0;color:#cbd5e1;">Opens the GitLab / GitHub compare view for that range</td></tr>
+      </table>
+    </div>
+
+    <!-- Commit nodes -->
+    <div style="margin-bottom:18px;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4a5568;margin-bottom:10px;">Commit Nodes</div>
+      <table style="border-collapse:collapse;width:100%;font-size:13px;">
+        <tr><td style="padding:4px 0;width:56%;color:#a0aec0;">Click node</td><td style="padding:4px 0;color:#cbd5e1;">Copies the full 40-character SHA to the clipboard (amber flash)</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Drag node onto another</td><td style="padding:4px 0;color:#cbd5e1;">Opens the forge compare view — always corrected to older&#8594;newer</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Ctrl + drag onto another</td><td style="padding:4px 0;color:#cbd5e1;">Opens the web server diff view for that range</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Hover SVG background</td><td style="padding:4px 0;color:#cbd5e1;">Tooltip: repo name, current branch, HEAD commit, author, date</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;vertical-align:top;">Right-click node</td><td style="padding:4px 0;color:#cbd5e1;">Context menu (see below)</td></tr>
+      </table>
+    </div>
+
+    <!-- Node colors -->
+    <div style="margin-bottom:18px;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4a5568;margin-bottom:10px;">Node Colors</div>
+      <table style="border-collapse:collapse;width:100%;font-size:13px;">
+        <tr><td style="padding:4px 0;width:56%;"><span style="background:#b7791f;color:#fffbeb;border-radius:4px;padding:1px 8px;font-size:11px;">yellow</span></td><td style="padding:4px 0;color:#cbd5e1;">Current checkout (HEAD)</td></tr>
+        <tr><td style="padding:4px 0;"><span style="background:#1e3a5f;color:#63b3ed;border-radius:4px;padding:1px 8px;font-size:11px;">blue</span></td><td style="padding:4px 0;color:#cbd5e1;">Local branch tip</td></tr>
+        <tr><td style="padding:4px 0;"><span style="background:#1c4532;color:#68d391;border-radius:4px;padding:1px 8px;font-size:11px;">green</span></td><td style="padding:4px 0;color:#cbd5e1;">Remote-tracking branch tip</td></tr>
+        <tr><td style="padding:4px 0;"><span style="background:#521b41;color:#fbb6ce;border-radius:4px;padding:1px 8px;font-size:11px;">pink</span></td><td style="padding:4px 0;color:#cbd5e1;">Tag</td></tr>
+        <tr><td style="padding:4px 0;"><span style="background:#744210;color:#fbd38d;border-radius:4px;padding:1px 8px;font-size:11px;">orange</span></td><td style="padding:4px 0;color:#cbd5e1;">Other ref (e.g. stash, notes)</td></tr>
+        <tr><td style="padding:4px 0;"><span style="background:#1a1f2e;color:#a0aec0;border:1px solid #4a5568;border-radius:4px;padding:1px 8px;font-size:11px;">dark</span></td><td style="padding:4px 0;color:#cbd5e1;">Merge junction or root commit</td></tr>
+      </table>
+    </div>
+
+    <!-- Right-click context menu -->
+    <div style="margin-bottom:18px;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4a5568;margin-bottom:10px;">Right-Click Context Menu on Commit Nodes</div>
+      <table style="border-collapse:collapse;width:100%;font-size:13px;">
+        <tr><td style="padding:4px 0;width:56%;color:#a0aec0;">Select / Change first commit</td><td style="padding:4px 0;color:#cbd5e1;">Pin a commit as the start of a manual compare range</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Compare with &lt;sha&gt;…</td><td style="padding:4px 0;color:#cbd5e1;">Open diff view between pinned and this commit</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Compare with AI…</td><td style="padding:4px 0;color:#cbd5e1;">AI summary (diff + log metadata) for the pinned range</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Compare with AI diff…</td><td style="padding:4px 0;color:#cbd5e1;">AI summary — diff only, no commit log</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Compare with AI log…</td><td style="padding:4px 0;color:#cbd5e1;">AI summary — commit log only, no diff</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Show Git Log…</td><td style="padding:4px 0;color:#cbd5e1;">Formatted commit list between pinned and this commit</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Copy SHA</td><td style="padding:4px 0;color:#cbd5e1;">Copies full 40-character commit hash</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Copy branch / tag</td><td style="padding:4px 0;color:#cbd5e1;">Copies the branch or tag name at this commit</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Delete local / remote branch</td><td style="padding:4px 0;color:#cbd5e1;">Force-deletes branch after confirmation</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Delete Tag (local + remote)</td><td style="padding:4px 0;color:#cbd5e1;">Removes tag locally and from all remotes after confirmation</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Checkout branch</td><td style="padding:4px 0;color:#cbd5e1;">Runs <code style="background:#2d3748;border-radius:3px;padding:1px 5px;font-size:11px;">git checkout &lt;branch&gt;</code></td></tr>
+      </table>
+    </div>
+
+    <!-- Diff view -->
+    <div style="margin-bottom:18px;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4a5568;margin-bottom:10px;">Diff / Commit View (opens in new tab)</div>
+      <table style="border-collapse:collapse;width:100%;font-size:13px;">
+        <tr><td style="padding:4px 0;width:56%;color:#a0aec0;">Commit cards</td><td style="padding:4px 0;color:#cbd5e1;">Each card shows hash, author, age, branch/tag badges, subject, and number of changed files</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Click commit hash</td><td style="padding:4px 0;color:#cbd5e1;">Opens the single-commit diff view for that commit</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Right-click commit card</td><td style="padding:4px 0;color:#cbd5e1;">Context menu to pin commit or compare with pinned</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Click file header</td><td style="padding:4px 0;color:#cbd5e1;">Collapse / expand that file&#39;s diff</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">File filter bar</td><td style="padding:4px 0;color:#cbd5e1;">Filter visible files by glob pattern (e.g. <code style="background:#2d3748;border-radius:3px;padding:1px 5px;font-size:11px;">*.rs *.toml</code>); persisted across views</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;"><kbd style="background:#2d3748;color:#a0aec0;border:1px solid #4a5568;border-radius:4px;padding:1px 7px;font-size:11px;">[</kbd></td><td style="padding:4px 0;color:#cbd5e1;">Navigate to older (parent) commit</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;"><kbd style="background:#2d3748;color:#a0aec0;border:1px solid #4a5568;border-radius:4px;padding:1px 7px;font-size:11px;">]</kbd></td><td style="padding:4px 0;color:#cbd5e1;">Navigate to newer (child) commit</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;"><kbd style="background:#2d3748;color:#a0aec0;border:1px solid #4a5568;border-radius:4px;padding:1px 7px;font-size:11px;">?</kbd></td><td style="padding:4px 0;color:#cbd5e1;">Toggle keyboard shortcut overlay</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Diff suppressed notice</td><td style="padding:4px 0;color:#cbd5e1;">Shown when changed files exceed the <code style="background:#2d3748;border-radius:3px;padding:1px 5px;font-size:11px;">-M</code> limit (default 100); raise with <code style="background:#2d3748;border-radius:3px;padding:1px 5px;font-size:11px;">-M 0</code> to disable</td></tr>
+      </table>
+    </div>
+
+    <!-- Filter bar -->
+    <div style="margin-bottom:18px;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4a5568;margin-bottom:10px;">Filter Bar (top-right of this page)</div>
+      <table style="border-collapse:collapse;width:100%;font-size:13px;">
+        <tr><td style="padding:4px 0;width:56%;color:#a0aec0;">Filter input</td><td style="padding:4px 0;color:#cbd5e1;">Glob patterns to pre-filter diff views (e.g. <code style="background:#2d3748;border-radius:3px;padding:1px 5px;font-size:11px;">src/ *.cs</code>)</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Orange dot ●</td><td style="padding:4px 0;color:#cbd5e1;">Indicates an active filter is applied to diff views</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Set / Enter</td><td style="padding:4px 0;color:#cbd5e1;">Save filter — persisted in browser storage across sessions</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">✕</td><td style="padding:4px 0;color:#cbd5e1;">Clear active filter</td></tr>
+      </table>
+    </div>
+
+    <!-- General -->
+    <div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4a5568;margin-bottom:10px;">General</div>
+      <table style="border-collapse:collapse;width:100%;font-size:13px;">
+        <tr><td style="padding:4px 0;width:56%;color:#a0aec0;">Auto-reload</td><td style="padding:4px 0;color:#cbd5e1;">Page reloads automatically when GGV regenerates the SVG</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;"><kbd style="background:#2d3748;color:#a0aec0;border:1px solid #4a5568;border-radius:4px;padding:1px 7px;font-size:11px;">?</kbd></td><td style="padding:4px 0;color:#cbd5e1;">Toggle this help overlay</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;"><kbd style="background:#2d3748;color:#a0aec0;border:1px solid #4a5568;border-radius:4px;padding:1px 7px;font-size:11px;">Esc</kbd></td><td style="padding:4px 0;color:#cbd5e1;">Close this help overlay</td></tr>
+      </table>
+    </div>
+  </div>
 </div>
 <script>
 (function(){{
@@ -728,6 +839,16 @@ fn serve_svg(stream: &mut TcpStream, svg_path: &str, repo_name: &str) {
     inp.value = '';
     refresh();
   }};
+  var overlay = document.getElementById('ggv-help-overlay');
+  window.ggvHelp = function(){{
+    var visible = overlay.style.display === 'flex';
+    overlay.style.display = visible ? 'none' : 'flex';
+  }};
+  document.addEventListener('keydown', function(e){{
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === '?') {{ ggvHelp(); return; }}
+    if (e.key === 'Escape') {{ overlay.style.display = 'none'; }}
+  }});
 }})();
 </script>
 </body>
