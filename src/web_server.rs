@@ -737,10 +737,9 @@ fn serve_svg(stream: &mut TcpStream, svg_path: &str, repo_name: &str) {
 
     <!-- Edge labels -->
     <div style="margin-bottom:18px;">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4a5568;margin-bottom:10px;">Edge Labels (blue numbers on arrows)</div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4a5568;margin-bottom:10px;">Edge Labels (numbers on edges)</div>
       <table style="border-collapse:collapse;width:100%;font-size:13px;">
         <tr><td style="padding:4px 0 4px 0;width:56%;color:#a0aec0;">Number value</td><td style="padding:4px 0;color:#cbd5e1;">Number of commits condensed into that edge</td></tr>
-        <tr><td style="padding:4px 0;color:#a0aec0;">Font size</td><td style="padding:4px 0;color:#cbd5e1;">Proportional to the number of changed files in that range</td></tr>
         <tr><td style="padding:4px 0;color:#a0aec0;">Hover edge label</td><td style="padding:4px 0;color:#cbd5e1;">Tooltip listing the changed files</td></tr>
         <tr><td style="padding:4px 0;color:#a0aec0;">Left-click edge label</td><td style="padding:4px 0;color:#cbd5e1;">Opens <code style="background:#2d3748;border-radius:3px;padding:1px 5px;font-size:11px;">git difftool</code> for that range</td></tr>
         <tr><td style="padding:4px 0;color:#a0aec0;">Right-click edge label</td><td style="padding:4px 0;color:#cbd5e1;">Context menu: AI diff+log, AI diff-only, AI log-only</td></tr>
@@ -749,9 +748,10 @@ fn serve_svg(stream: &mut TcpStream, svg_path: &str, repo_name: &str) {
 
     <!-- Edges -->
     <div style="margin-bottom:18px;">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4a5568;margin-bottom:10px;">Edges (arrows between commits)</div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4a5568;margin-bottom:10px;">Edges (lines between commits)</div>
       <table style="border-collapse:collapse;width:100%;font-size:13px;">
-        <tr><td style="padding:4px 0;width:56%;color:#a0aec0;">Hover edge</td><td style="padding:4px 0;color:#cbd5e1;">Tooltip listing all commits condensed into that range</td></tr>
+        <tr><td style="padding:4px 0;width:56%;color:#a0aec0;">Line thickness</td><td style="padding:4px 0;color:#cbd5e1;">Proportional to the number of changed lines (insertions + deletions) in that range</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Hover edge</td><td style="padding:4px 0;color:#cbd5e1;">Tooltip listing all commits condensed into that range</td></tr>
         <tr><td style="padding:4px 0;color:#a0aec0;">Click edge</td><td style="padding:4px 0;color:#cbd5e1;">Opens the GitLab / GitHub compare view for that range</td></tr>
       </table>
     </div>

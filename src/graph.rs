@@ -9,7 +9,8 @@ use crate::filter::RefFilter;
 use crate::theme::Theme;
 use crate::utils::{repo_name_from_path, time_ago};
 
-type EdgeAttrs = HashMap<(String, String), (Option<String>, Option<String>, usize, Option<String>)>;
+type EdgeAttrs =
+    HashMap<(String, String), (Option<String>, Option<String>, usize, Option<String>, usize)>;
 
 pub struct GitGraphviz {
     repo: Repository,
@@ -303,7 +304,7 @@ impl GitGraphviz {
         )?;
         writeln!(
             writer,
-            "  edge [color=\"{}\", penwidth=2.5, arrowsize=0.9, arrowhead=vee];",
+            "  edge [color=\"{}\", arrowhead=none, dir=none];",
             tc.edge_color
         )?;
         let graph_tooltip = build_graph_tooltip(&self.repo)
@@ -312,7 +313,7 @@ impl GitGraphviz {
             .replace('\n', "\\n");
         writeln!(
             writer,
-            "  graph [splines=ortho, nodesep=0.4, ranksep=0.5, pad=\"0.5,0.5\", tooltip=\"{}\"];",
+            "  graph [splines=line, nodesep=0.4, ranksep=0.5, pad=\"0.5,0.5\", tooltip=\"{}\"];",
             graph_tooltip
         )?;
 
@@ -367,20 +368,21 @@ impl GitGraphviz {
                 let tooltip = build_tooltip(&path_commits);
                 let count = count_path_commits(&self.repo, &commit.id, Some(pid));
                 let files = diff_file_list(&self.repo, pid, &commit.id);
+                let lines = diff_line_count(&self.repo, pid, &commit.id);
                 edge_attrs.insert(
                     (pid.clone(), commit.id.clone()),
-                    (url, tooltip, count, files),
+                    (url, tooltip, count, files, lines),
                 );
             }
         }
 
         for (child_id, parents) in &commit_parents {
             for parent_id in parents {
-                let (url, tooltip, count, files) = edge_attrs
+                let (url, tooltip, count, files, lines) = edge_attrs
                     .get(&(parent_id.clone(), child_id.clone()))
-                    .map(|(u, t, c, f)| (u.as_deref(), t.as_deref(), *c, f.as_deref()))
-                    .unwrap_or((None, None, 0, None));
-                let attrs = build_edge_attrs(url, tooltip, count, files);
+                    .map(|(u, t, c, f, l)| (u.as_deref(), t.as_deref(), *c, f.as_deref(), *l))
+                    .unwrap_or((None, None, 0, None, 0));
+                let attrs = build_edge_attrs(url, tooltip, count, files, lines);
                 writeln!(writer, "  \"{}\" -> \"{}\"{}", parent_id, child_id, attrs)?;
             }
         }
@@ -820,11 +822,48 @@ fn diff_file_list(repo: &Repository, from_sha: &str, to_sha: &str) -> Option<Str
     Some(files.join("|"))
 }
 
+fn edge_penwidth(line_count: usize) -> f32 {
+    if line_count == 0 {
+        return 1.0;
+    }
+    let pw = 0.5 + (line_count as f64 + 1.0).log10() as f32 * 1.2;
+    pw.clamp(0.5, 8.0)
+}
+
+fn diff_line_count(repo: &Repository, from_sha: &str, to_sha: &str) -> usize {
+    let Ok(from_oid) = Oid::from_str(from_sha) else {
+        return 0;
+    };
+    let Ok(to_oid) = Oid::from_str(to_sha) else {
+        return 0;
+    };
+    let Ok(from_commit) = repo.find_commit(from_oid) else {
+        return 0;
+    };
+    let Ok(to_commit) = repo.find_commit(to_oid) else {
+        return 0;
+    };
+    let Ok(from_tree) = from_commit.tree() else {
+        return 0;
+    };
+    let Ok(to_tree) = to_commit.tree() else {
+        return 0;
+    };
+    let Ok(diff) = repo.diff_tree_to_tree(Some(&from_tree), Some(&to_tree), None) else {
+        return 0;
+    };
+    let Ok(stats) = diff.stats() else {
+        return 0;
+    };
+    stats.insertions() + stats.deletions()
+}
+
 fn build_edge_attrs(
     url: Option<&str>,
     tooltip: Option<&str>,
     count: usize,
     files: Option<&str>,
+    lines: usize,
 ) -> String {
     let url_part = url.map_or(String::new(), |u| {
         format!("URL=\"{}\", target=\"_blank\"", u)
@@ -845,11 +884,18 @@ fn build_edge_attrs(
         let escaped = f.replace('\\', "\\\\").replace('"', "\\\"");
         format!("id=\"files:{}\"", escaped)
     });
-    let parts: Vec<&str> = [&url_part, &tooltip_part, &label_part, &id_part]
-        .iter()
-        .filter(|s| !s.is_empty())
-        .map(|s| s.as_str())
-        .collect();
+    let penwidth_part = format!("penwidth={:.1}", edge_penwidth(lines));
+    let parts: Vec<&str> = [
+        &url_part,
+        &tooltip_part,
+        &label_part,
+        &id_part,
+        &penwidth_part,
+    ]
+    .iter()
+    .filter(|s| !s.is_empty())
+    .map(|s| s.as_str())
+    .collect();
     if parts.is_empty() {
         String::new()
     } else {
