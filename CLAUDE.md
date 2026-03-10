@@ -34,6 +34,7 @@ Always run the complete quality check sequence:
 - Key options: `repo_path`, `output` (DOT file, default `ggv-<repo-name>.dot`), `no_show`, `filter`, `gitlab_url`
 - `web_server: bool` — defaults to `true`; set to `false` via `-s` / `--svg-only` to skip the web server and generate a standalone SVG
 - `max_diff_files: usize` — diff file limit for the web UI (default 100); if exceeded the diff view is suppressed and only commit cards are shown; `0` disables the limit
+- `gia_audio: bool` — defaults to `false`; set to `true` via `-N` / `--gia-audio` to enable microphone recording in gia
 
 **RefFilter (`main.rs`)**
 - Parses the `--filter` string (`b`=branches, `r`=remotes, `t`=tags, `h`=HEAD)
@@ -59,9 +60,10 @@ Always run the complete quality check sequence:
 - `load_diff_prompt()` — reads `~/.ggv/prompt/default_prompt.md`; creates the file with the built-in default if absent; prompt is re-read on every request so edits take effect without restart
 - `/delete-tag` route: deletes a tag locally (`git tag -d`) then from all remotes (`git push <remote> --delete`); triggers SVG regeneration
 - `diff2html_section()` — builds a self-contained HTML fragment with commit history cards and a side-by-side diff (diff2html embedded inline); appended after the AI summary in `build_html()`; returns `Err` (omits diff section) when changed-file count exceeds `max_diff_files`
-- `run_diff2html()` — serves the standalone `/diff2html` and `/diff2html-single` endpoints; when `max_diff_files` is exceeded the diff is suppressed and a warning notice is shown in place of the file view; commit cards are always rendered
+- `run_diff2html()` — serves the standalone `/diff2html` (non-AI) and `/diff2html-single` endpoints; when `max_diff_files` is exceeded the diff is suppressed and a warning notice is shown in place of the file view; commit cards are always rendered
 - `render_commit_cards()` — parses `git log --pretty=format:...` output into styled HTML cards with per-ref badge coloring and a per-commit file-count badge
 - `batch_file_counts()` — fetches changed-file counts for all commits in a range with a single `git log --name-only` call; result is a `HashMap<hash, count>` consumed by `render_commit_cards()`
+- `/diff2html?ai=1` — AI summary + diff2html inline; `?nolog=1` skips commit log metadata (diff-only); both served by the `/diff2html` route handler
 - `build_html()` — assembles the full AI summary page; accepts an optional `diff_section` rendered below the Markdown summary card
 - diff2html CSS and JS are embedded as Rust string constants (no CDN dependency)
 

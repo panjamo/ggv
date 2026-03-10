@@ -23,7 +23,7 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **Multilingual AI Output**: AI summaries are delivered in a configurable language (`-l`/`--lang`, e.g. `de-DE`, `en-US`, `fr-FR`); German is the default
 - **Rendered AI Output**: AI diff summaries are rendered as a styled HTML page in the browser — gia outputs Markdown which is converted to HTML on the fly; below the summary the page shows a commit history card list and a full side-by-side diff (via diff2html, embedded inline — no CDN required), with collapsible file sections
 - **Diff File Limit**: The side-by-side diff is suppressed when the number of changed files exceeds a configurable threshold (`-M`, default 100); commit cards with per-commit file counts are always shown; set `-M 0` to disable the limit
-- **Audio Input**: Microphone recording in gia is active by default; the voice input is treated as a filter or direction — e.g. "ignore test files" or "focus only on the API changes" — and is appended to the AI prompt; pass `-N` to disable
+- **Audio Input**: Microphone recording in gia is off by default; pass `-N` / `--gia-audio` to enable it — the voice input is treated as a filter or direction (e.g. "ignore test files" or "focus only on the API changes") and is appended to the AI prompt
 - **Cross-Platform**: Works on Windows, macOS, and Linux
 
 ## Prerequisites
@@ -87,7 +87,7 @@ Options:
   -P, --web-port <PORT>     Port for the diff server (0 = OS-assigned) [default: 0]
   -p, --gia-prompt <TEXT>   Custom prompt passed to gia (overrides built-in default)
   -l, --lang <LOCALE>       Language locale for AI output (e.g. de-DE, en-US, fr-FR) [default: de-DE]
-  -N, --no-gia-audio        Deactivate microphone audio recording in gia
+  -N, --gia-audio           Enable microphone audio recording in gia
   -M, --max-diff-files <N>  Max changed files to render in diff view; if exceeded only commit list is shown (0 = unlimited) [default: 100]
   -h, --help                Print help
   -V, --version             Print version
@@ -204,7 +204,7 @@ ggv --lang en-US
 ggv --lang fr-FR
 ```
 
-Deactivate audio input — gia will not record from the microphone:
+Enable audio input — gia will record from the microphone:
 
 ```bash
 ggv -N
@@ -222,7 +222,7 @@ Combined:
 ```bash
 ggv -p "summarize in three bullet points"
 ggv --lang en-US
-ggv -N --lang en-US
+ggv -N --lang en-US   # enable audio + set language
 ```
 
 The process stays alive after the SVG is opened, serving requests until Ctrl+C. Each `ggv` instance gets its own OS-assigned port, so multiple instances can run simultaneously.

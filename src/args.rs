@@ -110,9 +110,9 @@ pub struct Args {
     #[arg(
         short = 'N',
         long,
-        help = "Deactivate microphone audio recording in gia",
-        action = clap::ArgAction::SetFalse,
-        default_value_t = true
+        help = "Enable microphone audio recording in gia",
+        action = clap::ArgAction::SetTrue,
+        default_value_t = false
     )]
     pub gia_audio: bool,
 
