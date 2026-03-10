@@ -372,37 +372,9 @@ fn handle_connection(
                     return;
                 }
             };
-
-            let force_ai = params.get("ai").map(|v| v == "1").unwrap_or(false);
-            let include_log = !params.get("nolog").map(|v| v == "1").unwrap_or(false);
-            let filter_str = params.get("filter").cloned().unwrap_or_default();
-            let pathspecs = parse_pathspec(&filter_str);
-
-            if !force_ai {
-                if has_git_diff(repo_path, &sha1, &sha2, &[]) {
-                    run_git_difftool(repo_path, &sha1, &sha2);
-                } else {
-                    send_response(
-                        &mut stream,
-                        200,
-                        "text/html; charset=utf-8",
-                        &build_no_diff_html(&sha1, &sha2, theme),
-                    );
-                    return;
-                }
-            }
-
-            if !force_ai {
-                send_response(
-                    &mut stream,
-                    200,
-                    "text/html; charset=utf-8",
-                    "<html><body><script>window.close();</script></body></html>",
-                );
-                return;
-            }
-
-            if !has_git_diff(repo_path, &sha1, &sha2, &pathspecs) {
+            if has_git_diff(repo_path, &sha1, &sha2, &[]) {
+                run_git_difftool(repo_path, &sha1, &sha2);
+            } else {
                 send_response(
                     &mut stream,
                     200,
@@ -411,50 +383,12 @@ fn handle_connection(
                 );
                 return;
             }
-            let loaded_prompt = load_diff_prompt();
-            let base_prompt = prompt.as_deref().unwrap_or(&loaded_prompt).to_string();
-            let effective_prompt = with_lang(&base_prompt, lang);
-            let effective_prompt = if gia_audio {
-                with_audio(&effective_prompt)
-            } else {
-                effective_prompt
-            };
-            let summary = run_gia_diff(
-                repo_path,
-                &sha1,
-                &sha2,
-                Some(&effective_prompt),
-                include_log,
-                gia_audio,
-                &pathspecs,
+            send_response(
+                &mut stream,
+                200,
+                "text/html; charset=utf-8",
+                "<html><body><script>window.close();</script></body></html>",
             );
-            if summary.is_empty() {
-                send_response(
-                    &mut stream,
-                    200,
-                    "text/html; charset=utf-8",
-                    "<script>window.close();</script>",
-                );
-                return;
-            }
-            let diff_section = diff2html_section(
-                repo_path,
-                &sha1,
-                &sha2,
-                theme,
-                &pathspecs,
-                &filter_str,
-                max_diff_files,
-            )
-            .ok();
-            let html = build_html(
-                &sha1[..sha1.len().min(7)],
-                &sha2[..sha2.len().min(7)],
-                &summary,
-                theme,
-                diff_section,
-            );
-            send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
         }
         "/log-summary" => {
             let params = parse_query(query);
@@ -565,6 +499,7 @@ fn handle_connection(
             };
             let filter_str = params.get("filter").cloned().unwrap_or_default();
             let pathspecs = parse_pathspec(&filter_str);
+            let force_ai = params.get("ai").map(|v| v == "1").unwrap_or(false);
             if !has_git_diff(repo_path, &sha1, &sha2, &pathspecs) {
                 send_response(
                     &mut stream,
@@ -574,19 +509,67 @@ fn handle_connection(
                 );
                 return;
             }
-            let gitlab_url = regen.as_ref().and_then(|r| r.gitlab_url.as_deref());
-            match run_diff2html(
-                repo_path,
-                &sha1,
-                &sha2,
-                theme,
-                &pathspecs,
-                &filter_str,
-                max_diff_files,
-                gitlab_url,
-            ) {
-                Ok(html) => send_response(&mut stream, 200, "text/html; charset=utf-8", &html),
-                Err(e) => send_response(&mut stream, 500, "text/plain", &e),
+            if force_ai {
+                let include_log = !params.get("nolog").map(|v| v == "1").unwrap_or(false);
+                let loaded_prompt = load_diff_prompt();
+                let base_prompt = prompt.as_deref().unwrap_or(&loaded_prompt).to_string();
+                let effective_prompt = with_lang(&base_prompt, lang);
+                let effective_prompt = if gia_audio {
+                    with_audio(&effective_prompt)
+                } else {
+                    effective_prompt
+                };
+                let summary = run_gia_diff(
+                    repo_path,
+                    &sha1,
+                    &sha2,
+                    Some(&effective_prompt),
+                    include_log,
+                    gia_audio,
+                    &pathspecs,
+                );
+                if summary.is_empty() {
+                    send_response(
+                        &mut stream,
+                        200,
+                        "text/html; charset=utf-8",
+                        "<script>window.close();</script>",
+                    );
+                    return;
+                }
+                let diff_section = diff2html_section(
+                    repo_path,
+                    &sha1,
+                    &sha2,
+                    theme,
+                    &pathspecs,
+                    &filter_str,
+                    max_diff_files,
+                )
+                .ok();
+                let html = build_html(
+                    &sha1[..sha1.len().min(7)],
+                    &sha2[..sha2.len().min(7)],
+                    &summary,
+                    theme,
+                    diff_section,
+                );
+                send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
+            } else {
+                let gitlab_url = regen.as_ref().and_then(|r| r.gitlab_url.as_deref());
+                match run_diff2html(
+                    repo_path,
+                    &sha1,
+                    &sha2,
+                    theme,
+                    &pathspecs,
+                    &filter_str,
+                    max_diff_files,
+                    gitlab_url,
+                ) {
+                    Ok(html) => send_response(&mut stream, 200, "text/html; charset=utf-8", &html),
+                    Err(e) => send_response(&mut stream, 500, "text/plain", &e),
+                }
             }
         }
         "/diff2html-single" => {

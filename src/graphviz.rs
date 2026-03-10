@@ -422,11 +422,11 @@ window.addEventListener('load', function() {
           ctxMenu.appendChild(makeDivider());
           ctxMenu.appendChild(makeMenuItem('AI: Summarize Changes \u2013 ' + range, function() {
             setSecondHL(g);
-            window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2 + '&ai=1' + ggvFilterParam(), '_blank');
+            window.open(wsUrl + '/diff2html?from=' + fromSha2 + '&to=' + toSha2 + '&ai=1' + ggvFilterParam(), '_blank');
           }));
           ctxMenu.appendChild(makeMenuItem('AI: Summarize Diff Only \u2013 ' + range, function() {
             setSecondHL(g);
-            window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2 + '&ai=1&nolog=1' + ggvFilterParam(), '_blank');
+            window.open(wsUrl + '/diff2html?from=' + fromSha2 + '&to=' + toSha2 + '&ai=1&nolog=1' + ggvFilterParam(), '_blank');
           }));
           ctxMenu.appendChild(makeMenuItem('AI: Summarize Commits \u2013 ' + range, function() {
             setSecondHL(g);
@@ -506,7 +506,7 @@ window.addEventListener('load', function() {
       }));
       ctxMenu.appendChild(makeDivider());
       ctxMenu.appendChild(makeMenuItem('AI: Summarize Changes', function() {
-        window.open(wsUrl + '/diff?from=' + fromSha + '&to=' + toSha + '&ai=1' + ggvFilterParam(), '_blank');
+        window.open(wsUrl + '/diff2html?from=' + fromSha + '&to=' + toSha + '&ai=1' + ggvFilterParam(), '_blank');
       }));
       ctxMenu.appendChild(makeMenuItem('AI: Summarize Commits', function() {
         window.open(wsUrl + '/log-summary?from=' + fromSha + '&to=' + toSha + ggvFilterParam(), '_blank');
