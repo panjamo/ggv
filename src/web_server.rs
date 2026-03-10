@@ -255,7 +255,8 @@ fn handle_connection(
     };
 
     let parts: Vec<&str> = request_line.splitn(3, ' ').collect();
-    if parts.len() < 2 || parts[0] != "GET" {
+    let method = parts[0];
+    if parts.len() < 2 || (method != "GET" && method != "POST") {
         return;
     }
 
@@ -273,6 +274,11 @@ fn handle_connection(
                 .as_secs();
             last_hb.store(now, Ordering::Relaxed);
             send_response(&mut stream, 200, "text/plain", "OK");
+        }
+        "/shutdown" => {
+            send_response(&mut stream, 200, "text/plain", "Bye");
+            eprintln!("Tab closed — shutting down.");
+            std::process::exit(0);
         }
         "/view" => {
             let repo_name = crate::utils::repo_name_from_path(repo_path);
@@ -696,6 +702,8 @@ fn serve_svg(stream: &mut TcpStream, svg_path: &str, repo_name: &str) {
   setInterval(poll, 1500);
   poll();
   setInterval(function() {{ fetch('/heartbeat').catch(function(){{}}); }}, 2000);
+  window.addEventListener('pagehide', function() {{ navigator.sendBeacon('/shutdown'); }});
+  document.addEventListener('visibilitychange', function() {{ if (document.visibilityState === 'hidden') {{ navigator.sendBeacon('/shutdown'); }} }});
 }})();
 </script>
 </head>
