@@ -189,11 +189,13 @@ Use a fixed port (useful when the SVG will be reopened later):
 ggv -P 8080
 ```
 
-Use a custom prompt:
+Use a custom prompt for this run only:
 
 ```bash
 ggv -p "list the changed files and explain each change in one sentence"
 ```
+
+To permanently customize the AI prompt, edit `~/.ggv/prompt/default_prompt.md`. The file is created automatically on first run with the built-in default. Changes take effect immediately — no restart required.
 
 Set AI output language (default is German):
 
@@ -350,6 +352,7 @@ cargo check
 - **anyhow** — Error handling
 - **chrono** — Date/time formatting
 - **pulldown-cmark** — Markdown to HTML rendering for AI summaries
+- **dirs** — Resolves the user home directory for config file paths
 
 ## Architecture
 

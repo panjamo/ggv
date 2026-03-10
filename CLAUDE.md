@@ -56,6 +56,7 @@ Always run the complete quality check sequence:
 **Web Server (`web_server.rs`)**
 - Started automatically unless `-s` / `--svg-only` is passed
 - Handles diff and AI summary requests from the SVG context menu
+- `load_diff_prompt()` — reads `~/.ggv/prompt/default_prompt.md`; creates the file with the built-in default if absent; prompt is re-read on every request so edits take effect without restart
 - `/delete-tag` route: deletes a tag locally (`git tag -d`) then from all remotes (`git push <remote> --delete`); triggers SVG regeneration
 - `diff2html_section()` — builds a self-contained HTML fragment with commit history cards and a side-by-side diff (diff2html embedded inline); appended after the AI summary in `build_html()`; returns `Err` (omits diff section) when changed-file count exceeds `max_diff_files`
 - `run_diff2html()` — serves the standalone `/diff2html` and `/diff2html-single` endpoints; when `max_diff_files` is exceeded the diff is suppressed and a warning notice is shown in place of the file view; commit cards are always rendered
@@ -85,6 +86,7 @@ Always run the complete quality check sequence:
 - `clap` with derive features — CLI argument parsing
 - `anyhow` — Error handling with context
 - `chrono` with serde — Date/time types
+- `dirs` — Resolves the user home directory for config file paths
 
 ### External Requirements
 - **Graphviz** must be installed (`dot.exe` / `dot`). GGV searches for it automatically:

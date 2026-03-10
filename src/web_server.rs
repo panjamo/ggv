@@ -89,6 +89,23 @@ Format:
 
 const DEFAULT_LOG_PROMPT: &str = DEFAULT_DIFF_PROMPT;
 
+/// Returns the diff prompt: reads `~/.ggv/prompt/default_prompt.md` if it exists,
+/// otherwise writes the built-in default there and returns it.
+fn load_diff_prompt() -> String {
+    if let Some(home) = dirs::home_dir() {
+        let prompt_path = home.join(".ggv").join("prompt").join("default_prompt.md");
+        if prompt_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&prompt_path) {
+                return content;
+            }
+        } else if let Some(parent) = prompt_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+            let _ = std::fs::write(&prompt_path, DEFAULT_DIFF_PROMPT);
+        }
+    }
+    DEFAULT_DIFF_PROMPT.to_string()
+}
+
 /// Git log format used as metadata context when feeding diffs to the AI.
 const GIT_LOG_METADATA_FORMAT: &str =
     "--pretty=format:commit %h%nRefs: %D%nAuthor: %an <%ae>%nDate: %ci%nSubject: %s%n";
@@ -394,7 +411,8 @@ fn handle_connection(
                 );
                 return;
             }
-            let base_prompt = prompt.as_deref().unwrap_or(DEFAULT_DIFF_PROMPT).to_string();
+            let loaded_prompt = load_diff_prompt();
+            let base_prompt = prompt.as_deref().unwrap_or(&loaded_prompt).to_string();
             let effective_prompt = with_lang(&base_prompt, lang);
             let effective_prompt = if gia_audio {
                 with_audio(&effective_prompt)
@@ -2158,7 +2176,8 @@ fn run_gia_diff(
     let label2 = get_ref_label(repo_path, sha2);
     let header_path = write_header_file(&label1, &label2);
 
-    let effective_prompt = prompt.unwrap_or(DEFAULT_DIFF_PROMPT);
+    let loaded_prompt = load_diff_prompt();
+    let effective_prompt = prompt.unwrap_or(&loaded_prompt);
     let mut gia_args: Vec<String> = vec!["--markdown".to_string(), effective_prompt.to_string()];
     if gia_audio {
         gia_args.push("-a".to_string());
