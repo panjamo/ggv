@@ -59,13 +59,25 @@ fn main() -> Result<()> {
         .to_string_lossy()
         .to_string();
 
+    // Create git_viz first so that auto-detected gitlab_url is available for the web server.
+    let from_clone = args.from.clone();
+    let filter = RefFilter::from_string(&args.filter);
+    let git_viz = GitGraphviz::new(
+        &args.repo_path,
+        filter,
+        args.gitlab_url,
+        args.from,
+        args.theme,
+        args.current_branch,
+    )?;
+
     let (server_handle, web_server_url) = if args.web_server {
         let regen = web_server::RegenerateConfig {
             repo_path: args.repo_path.clone(),
             dot_path: output.clone(),
             filter: args.filter.clone(),
-            gitlab_url: args.gitlab_url.clone(),
-            from_commit: args.from.clone(),
+            gitlab_url: git_viz.forge_url().map(String::from),
+            from_commit: from_clone,
             theme: args.theme,
             current_branch_only: args.current_branch,
             no_fetch: args.no_fetch,
@@ -88,16 +100,6 @@ fn main() -> Result<()> {
     } else {
         (None, None)
     };
-
-    let filter = RefFilter::from_string(&args.filter);
-    let git_viz = GitGraphviz::new(
-        &args.repo_path,
-        filter,
-        args.gitlab_url,
-        args.from,
-        args.theme,
-        args.current_branch,
-    )?;
     git_viz.generate_dot(&output)?;
 
     if !args.no_show {

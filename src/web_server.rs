@@ -555,6 +555,7 @@ fn handle_connection(
                 );
                 return;
             }
+            let gitlab_url = regen.as_ref().and_then(|r| r.gitlab_url.as_deref());
             match run_diff2html(
                 repo_path,
                 &sha1,
@@ -563,6 +564,7 @@ fn handle_connection(
                 &pathspecs,
                 &filter_str,
                 max_diff_files,
+                gitlab_url,
             ) {
                 Ok(html) => send_response(&mut stream, 200, "text/html; charset=utf-8", &html),
                 Err(e) => send_response(&mut stream, 500, "text/plain", &e),
@@ -619,6 +621,7 @@ fn handle_connection(
                 Some(sha1.clone())
             };
             let newer = find_child_commit(repo_path, &sha2);
+            let gitlab_url = regen.as_ref().and_then(|r| r.gitlab_url.as_deref());
             match run_diff2html(
                 repo_path,
                 &sha1,
@@ -627,6 +630,7 @@ fn handle_connection(
                 &pathspecs,
                 &filter_str,
                 max_diff_files,
+                gitlab_url,
             ) {
                 Ok(html) => {
                     let html = inject_commit_navigation(&html, older.as_deref(), newer.as_deref());
@@ -1602,6 +1606,7 @@ function ggvClearFilter(){{
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_diff2html(
     repo_path: &str,
     sha1: &str,
@@ -1610,6 +1615,7 @@ fn run_diff2html(
     pathspecs: &[String],
     filter_str: &str,
     max_diff_files: usize,
+    gitlab_url: Option<&str>,
 ) -> Result<String, String> {
     // Determine chronological order so we always diff older → newer
     let sha1_is_ancestor = std::process::Command::new("git")
@@ -1735,16 +1741,32 @@ fn run_diff2html(
         ),
     };
 
+    // Build links for the filter bar: git difftool and optional GitLab compare.
+    let difftool_url = format!("/diff?from={sha1}&to={sha2}");
+    let gitlab_link = gitlab_url.map(|base| {
+        let compare_segment = if base.contains("github.com") {
+            "/compare/"
+        } else {
+            "/-/compare/"
+        };
+        format!(
+            r#"<a class="ggv-flt-link" href="{base}{compare_segment}{sha1}...{sha2}" target="_blank">GitLab</a>"#
+        )
+    }).unwrap_or_default();
+
     // Build the filter bar (top) and diff section (below commit list) conditionally.
     // When the file limit is exceeded we skip the diff2html library and the git diff output.
     let (diff_filter_bar, diff_section) = if show_diff {
-        let filter_bar = r#"<div class="ggv-filter-bar">
+        let filter_bar = format!(
+            r#"<div class="ggv-filter-bar">
   <span class="ggv-flt-label">File filter:</span>
   <input id="ggv-flt" class="ggv-flt-input" type="text" placeholder="*.cpp *.h  or  src/ *.cs">
   <button class="ggv-flt-btn" onclick="ggvApplyFilter()">Apply</button>
   <button class="ggv-flt-btn" onclick="ggvClearFilter()">Clear</button>
+  <button class="ggv-flt-link" onclick="fetch('{difftool_url}')">Git Difftool</button>
+  {gitlab_link}
 </div>"#
-            .to_string();
+        );
         let section = format!(
             r#"<div class="ggv-diff">
 <div id="diff"></div>
@@ -1906,6 +1928,12 @@ function ggvClearFilter(){{
   font-size: 12px;
 }}
 .ggv-flt-btn:hover {{ background: {card_border}; }}
+.ggv-flt-link {{
+  padding: 4px 10px; border-radius: 4px; cursor: pointer;
+  border: 1px solid {section_border}; background: {card_bg}; color: {text};
+  font-size: 12px; text-decoration: none; white-space: nowrap;
+}}
+.ggv-flt-link:hover {{ background: {card_border}; text-decoration: none; }}
 </style>
 </head>
 <body>
