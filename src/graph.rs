@@ -3,6 +3,7 @@ use git2::{BranchType, Oid, Repository};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::path::PathBuf;
 
 use crate::commit_node::CommitNode;
 use crate::filter::RefFilter;
@@ -14,6 +15,7 @@ type EdgeAttrs =
 
 pub struct GitGraphviz {
     repo: Repository,
+    repo_path: PathBuf,
     filter: RefFilter,
     gitlab_base_url: Option<String>,
     ancestor_oid: Option<Oid>,
@@ -33,6 +35,8 @@ impl GitGraphviz {
         let repo = Repository::open(repo_path)
             .with_context(|| format!("Failed to open repository at: {}", repo_path))?;
 
+        let repo_path = repo.workdir().unwrap_or_else(|| repo.path()).to_path_buf();
+
         let gitlab_base_url = gitlab_url.or_else(|| Self::detect_gitlab_url(&repo));
 
         let ancestor_oid = if let Some(ref spec) = from_commit {
@@ -49,6 +53,7 @@ impl GitGraphviz {
 
         Ok(Self {
             repo,
+            repo_path,
             filter,
             gitlab_base_url,
             ancestor_oid,
@@ -100,22 +105,24 @@ impl GitGraphviz {
         None
     }
 
-    fn collect_path_commits(
+    /// Single revwalk that collects the first `max` commits AND counts the total.
+    fn collect_path_commits_with_count(
         &self,
         from_id: &str,
         stop_id: Option<&str>,
         max: usize,
-    ) -> Vec<(String, String, String, String)> {
-        let mut result = Vec::new();
+    ) -> (Vec<(String, String, String, String)>, usize) {
+        let mut sample = Vec::new();
+        let mut total: usize = 0;
 
         let Ok(oid) = from_id.parse::<Oid>() else {
-            return result;
+            return (sample, total);
         };
         let Ok(mut revwalk) = self.repo.revwalk() else {
-            return result;
+            return (sample, total);
         };
         if revwalk.push(oid).is_err() {
-            return result;
+            return (sample, total);
         }
         if let Some(stop) = stop_id {
             if let Ok(stop_oid) = stop.parse::<Oid>() {
@@ -125,27 +132,30 @@ impl GitGraphviz {
 
         for oid_result in revwalk {
             let Ok(oid) = oid_result else { break };
-            let Ok(commit) = self.repo.find_commit(oid) else {
-                continue;
-            };
-            let id_str = oid.to_string();
-            let short_id = format!("{:.7}", id_str);
-            let message = commit.summary().unwrap_or("").to_string();
-            let author = String::from_utf8_lossy(commit.author().name_bytes()).to_string();
-            let when = time_ago(commit.time().seconds());
-            result.push((short_id, message, author, when));
-            if result.len() >= max {
-                result.push((
-                    "...".to_string(),
-                    "(truncated)".to_string(),
-                    String::new(),
-                    String::new(),
-                ));
-                break;
+            total += 1;
+            if sample.len() < max {
+                let Ok(commit) = self.repo.find_commit(oid) else {
+                    continue;
+                };
+                let id_str = oid.to_string();
+                let short_id = format!("{:.7}", id_str);
+                let message = commit.summary().unwrap_or("").to_string();
+                let author = String::from_utf8_lossy(commit.author().name_bytes()).to_string();
+                let when = time_ago(commit.time().seconds());
+                sample.push((short_id, message, author, when));
             }
         }
 
-        result
+        if total > max {
+            sample.push((
+                "...".to_string(),
+                "(truncated)".to_string(),
+                String::new(),
+                String::new(),
+            ));
+        }
+
+        (sample, total)
     }
 
     pub fn generate_dot(&self, output_path: &str) -> Result<()> {
@@ -283,8 +293,7 @@ impl GitGraphviz {
 
         let mut commit_parents: HashMap<String, Vec<String>> = HashMap::new();
         for commit in condensed_graph.values() {
-            let connections =
-                self.find_condensed_connections(&commit.id, &condensed_graph, &referenced_commits)?;
+            let connections = self.find_condensed_connections(&commit.id, &condensed_graph)?;
             let mut seen = HashSet::new();
             let valid: Vec<String> = connections
                 .into_iter()
@@ -322,8 +331,8 @@ impl GitGraphviz {
             writeln!(writer, "  {}", commit.get_dot_node(self.theme))?;
         }
 
-        // Build edge attributes: (parent_id, child_id) -> (url, tooltip, count)
-        let mut edge_attrs: EdgeAttrs = HashMap::new();
+        // Collect all (parent_id, child_id) pairs that need edge attributes
+        let mut pairs_ordered: Vec<(String, String)> = Vec::new();
         for commit in condensed_graph.values() {
             let is_ancestor_root = self
                 .ancestor_oid
@@ -332,48 +341,77 @@ impl GitGraphviz {
                 continue;
             }
             let parents = commit_parents.get(&commit.id).cloned().unwrap_or_default();
-            for pid in &parents {
-                let url = self.gitlab_base_url.as_deref().map(|base| {
-                    let is_github = base.contains("github.com");
-                    let from_ref = if is_github {
-                        condensed_graph
-                            .get(pid)
-                            .map(|c| c.id.as_str())
-                            .unwrap_or(pid.as_str())
-                    } else {
-                        condensed_graph
-                            .get(pid)
-                            .map(|c| c.best_ref_for_url())
-                            .unwrap_or(pid.as_str())
-                    };
-                    let to_ref = if is_github {
-                        commit.id.as_str()
-                    } else {
-                        commit.best_ref_for_url()
-                    };
-                    let compare_segment = if is_github {
-                        "/compare/"
-                    } else {
-                        "/-/compare/"
-                    };
-                    format!(
-                        "{}{}{}...{}",
-                        base,
-                        compare_segment,
-                        url_encode_ref(from_ref),
-                        url_encode_ref(to_ref)
-                    )
-                });
-                let path_commits = self.collect_path_commits(&commit.id, Some(pid.as_str()), 20);
-                let tooltip = build_tooltip(&path_commits);
-                let count = count_path_commits(&self.repo, &commit.id, Some(pid));
-                let files = diff_file_list(&self.repo, pid, &commit.id);
-                let lines = diff_line_count(&self.repo, pid, &commit.id);
-                edge_attrs.insert(
-                    (pid.clone(), commit.id.clone()),
-                    (url, tooltip, count, files, lines),
-                );
+            for pid in parents {
+                pairs_ordered.push((pid, commit.id.clone()));
             }
+        }
+
+        // Batch-compute file lists for all edges via one git diff-tree subprocess
+        let batch_files = batch_diff_file_lists(&self.repo_path, &pairs_ordered);
+
+        // Build edge attributes: (parent_id, child_id) -> (url, tooltip, count)
+        let mut edge_attrs: EdgeAttrs = HashMap::new();
+        for (pid, child_id) in &pairs_ordered {
+            let commit = match condensed_graph.get(child_id) {
+                Some(c) => c,
+                None => continue,
+            };
+            let url = self.gitlab_base_url.as_deref().map(|base| {
+                let is_github = base.contains("github.com");
+                let from_ref = if is_github {
+                    condensed_graph
+                        .get(pid)
+                        .map(|c| c.id.as_str())
+                        .unwrap_or(pid.as_str())
+                } else {
+                    condensed_graph
+                        .get(pid)
+                        .map(|c| c.best_ref_for_url())
+                        .unwrap_or(pid.as_str())
+                };
+                let to_ref = if is_github {
+                    commit.id.as_str()
+                } else {
+                    commit.best_ref_for_url()
+                };
+                let compare_segment = if is_github {
+                    "/compare/"
+                } else {
+                    "/-/compare/"
+                };
+                format!(
+                    "{}{}{}...{}",
+                    base,
+                    compare_segment,
+                    url_encode_ref(from_ref),
+                    url_encode_ref(to_ref)
+                )
+            });
+            let (path_commits, count) =
+                self.collect_path_commits_with_count(child_id, Some(pid.as_str()), 20);
+            let tooltip = build_tooltip(&path_commits);
+            let (files, file_count) = batch_files
+                .get(&(pid.clone(), child_id.clone()))
+                .map(|v| {
+                    let total = v.len();
+                    const MAX: usize = 30;
+                    let list = if total == 0 {
+                        None
+                    } else if total > MAX {
+                        let mut truncated = v[..MAX].join("|");
+                        truncated.push_str(&format!("|... +{} more", total - MAX));
+                        Some(truncated)
+                    } else {
+                        Some(v.join("|"))
+                    };
+                    (list, total)
+                })
+                .unwrap_or((None, 0));
+            let lines = file_count; // use file count as fast proxy for edge thickness
+            edge_attrs.insert(
+                (pid.clone(), child_id.clone()),
+                (url, tooltip, count, files, lines),
+            );
         }
 
         for (child_id, parents) in &commit_parents {
@@ -655,7 +693,6 @@ impl GitGraphviz {
         &self,
         commit_id: &str,
         condensed_graph: &HashMap<String, CommitNode>,
-        _referenced_commits: &HashMap<String, CommitNode>,
     ) -> Result<Vec<String>> {
         let mut connections = Vec::new();
 
@@ -763,24 +800,6 @@ fn build_graph_tooltip(repo: &Repository) -> String {
     lines.join("\n")
 }
 
-fn count_path_commits(repo: &git2::Repository, from_id: &str, stop_id: Option<&str>) -> usize {
-    let Ok(oid) = from_id.parse::<Oid>() else {
-        return 0;
-    };
-    let Ok(mut revwalk) = repo.revwalk() else {
-        return 0;
-    };
-    if revwalk.push(oid).is_err() {
-        return 0;
-    }
-    if let Some(stop) = stop_id {
-        if let Ok(stop_oid) = stop.parse::<Oid>() {
-            let _ = revwalk.hide(stop_oid);
-        }
-    }
-    revwalk.count()
-}
-
 fn build_tooltip(path_commits: &[(String, String, String, String)]) -> Option<String> {
     if path_commits.is_empty() {
         return None;
@@ -794,32 +813,83 @@ fn build_tooltip(path_commits: &[(String, String, String, String)]) -> Option<St
     )
 }
 
-fn diff_file_list(repo: &Repository, from_sha: &str, to_sha: &str) -> Option<String> {
-    let from_oid = Oid::from_str(from_sha).ok()?;
-    let to_oid = Oid::from_str(to_sha).ok()?;
-    let from_tree = repo.find_commit(from_oid).ok()?.tree().ok()?;
-    let to_tree = repo.find_commit(to_oid).ok()?.tree().ok()?;
-    let diff = repo
-        .diff_tree_to_tree(Some(&from_tree), Some(&to_tree), None)
-        .ok()?;
-    let mut files: Vec<String> = Vec::new();
-    for d in diff.deltas() {
-        // Use path_bytes to avoid UTF-8 panic from git2 internals
-        if let Some(path_bytes) = d.new_file().path_bytes() {
-            let path_str = String::from_utf8_lossy(path_bytes);
-            files.push(path_str.to_string());
+/// Run one `git diff-tree --name-only -r --stdin` subprocess for all pairs at once.
+/// Returns a map from (from_sha, to_sha) → Vec<file_path>.
+fn batch_diff_file_lists(
+    repo_path: &std::path::Path,
+    pairs: &[(String, String)],
+) -> HashMap<(String, String), Vec<String>> {
+    use std::io::Write as IoWrite;
+    use std::process::{Command, Stdio};
+
+    let mut result: HashMap<(String, String), Vec<String>> = HashMap::new();
+    if pairs.is_empty() {
+        return result;
+    }
+
+    let mut child = match Command::new("git")
+        .args([
+            "-C",
+            &repo_path.to_string_lossy(),
+            "diff-tree",
+            "--name-only",
+            "-r",
+            "--stdin",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return result,
+    };
+
+    // Write all pairs to stdin
+    if let Some(stdin) = child.stdin.take() {
+        let mut stdin = stdin;
+        for (from, to) in pairs {
+            let _ = writeln!(stdin, "{} {}", from, to);
         }
     }
-    const MAX: usize = 30;
-    let total = files.len();
-    if total == 0 {
-        return None;
+
+    let output = match child.wait_with_output() {
+        Ok(o) => o,
+        Err(_) => return result,
+    };
+
+    let text = match std::str::from_utf8(&output.stdout) {
+        Ok(s) => s,
+        Err(_) => return result,
+    };
+
+    // Parse output: each pair starts with the 40-char from_sha on its own line,
+    // followed by zero or more file path lines.
+    let mut pair_iter = pairs.iter();
+    let mut current_pair: Option<&(String, String)> = None;
+    let mut current_files: Vec<String> = Vec::new();
+
+    for line in text.lines() {
+        // A SHA1 header line (exactly 40 hex chars) signals a new pair
+        if line.len() == 40 && line.chars().all(|c| c.is_ascii_hexdigit()) {
+            // Flush previous pair
+            if let Some(pair) = current_pair.take() {
+                result.insert(
+                    (pair.0.clone(), pair.1.clone()),
+                    std::mem::take(&mut current_files),
+                );
+            }
+            current_pair = pair_iter.next();
+        } else if !line.is_empty() {
+            current_files.push(line.to_string());
+        }
     }
-    if total > MAX {
-        files.truncate(MAX);
-        files.push(format!("... +{} more", total - MAX));
+    // Flush last pair
+    if let Some(pair) = current_pair {
+        result.insert((pair.0.clone(), pair.1.clone()), current_files);
     }
-    Some(files.join("|"))
+
+    result
 }
 
 fn edge_penwidth(line_count: usize) -> f32 {
@@ -828,34 +898,6 @@ fn edge_penwidth(line_count: usize) -> f32 {
     }
     let pw = 0.5 + (line_count as f64 + 1.0).log10() as f32 * 1.2;
     pw.clamp(0.5, 8.0)
-}
-
-fn diff_line_count(repo: &Repository, from_sha: &str, to_sha: &str) -> usize {
-    let Ok(from_oid) = Oid::from_str(from_sha) else {
-        return 0;
-    };
-    let Ok(to_oid) = Oid::from_str(to_sha) else {
-        return 0;
-    };
-    let Ok(from_commit) = repo.find_commit(from_oid) else {
-        return 0;
-    };
-    let Ok(to_commit) = repo.find_commit(to_oid) else {
-        return 0;
-    };
-    let Ok(from_tree) = from_commit.tree() else {
-        return 0;
-    };
-    let Ok(to_tree) = to_commit.tree() else {
-        return 0;
-    };
-    let Ok(diff) = repo.diff_tree_to_tree(Some(&from_tree), Some(&to_tree), None) else {
-        return 0;
-    };
-    let Ok(stats) = diff.stats() else {
-        return 0;
-    };
-    stats.insertions() + stats.deletions()
 }
 
 fn build_edge_attrs(
