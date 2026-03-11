@@ -1,6 +1,6 @@
 # GGV - Git Graph Visualizer
 
-A Rust CLI tool that generates visual representations of Git repository structure using Graphviz DOT format and SVG output.
+A Rust CLI tool that generates visual representations of Git repository structure using Graphviz DOT format and SVG output rendered in-browser via WASM.
 
 <img src="doc/icon.png" alt="GGV Icon" width="128" height="128">
 
@@ -10,7 +10,7 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **Condensed Graph**: Only referenced commits (branch tips, tags, root, merge junctions) are shown — intermediate commits are skipped for clarity
 - **Dual Theme**: Dark and light theme — branch nodes are color-coded by type (main, develop, feature/\*, release/\*, hotfix/\*); dark is the default, switch with `-t light`
 - **Auto Fetch**: Runs `git fetch --tags --prune` before generating the graph to ensure tags are current and stale remote-tracking refs are removed
-- **SVG Output**: Generates high-quality SVG images opened automatically in your default viewer
+- **SVG Output**: Generates high-quality SVG images served via a local web server
 - **Ref Filtering**: Choose which ref types to include (local branches, remotes, tags, HEAD)
 - **Current-Branch View**: `-c` hides all refs not on the ancestry path of HEAD — shows only what is reachable from the current checkout
 - **Subtree View**: Limit the graph to a specific commit and all its descendants (`-F`)
@@ -18,7 +18,7 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **Drag-to-Compare**: Drag any commit node onto another to open a GitLab or GitHub compare view for that arbitrary range — order is corrected automatically (always `older...newer`)
 - **SHA Copy**: Click any commit node to copy its full 40-character SHA to the clipboard (amber border flash confirms)
 - **Graph Tooltip**: Hover the SVG background to see the repository name, current branch, HEAD commit, author, and date
-- **AI Diff Server**: A local web server starts automatically and opens `git difftool` when you left-click an edge count label; right-clicking always offers AI diff options (full diff+log, diff-only, log-only); pass `-s` / `--svg-only` to skip the server and generate a standalone SVG for sharing
+- **AI Diff Server**: A local web server starts automatically serving the SVG and handling diff requests; left-click an edge count label to open `git difftool`; right-click offers AI diff options (full diff+log, diff-only, log-only)
 - **Smart AI Diff**: AI summaries use merge-base detection to produce the correct snapshot diff (`git diff`) enriched with structured commit metadata (`git log`) passed to gia as additional context; a "diff-only" variant skips the log metadata for a more focused summary
 - **Multilingual AI Output**: AI summaries are delivered in a configurable language (`-l`/`--lang`, e.g. `de-DE`, `en-US`, `fr-FR`); German is the default
 - **Rendered AI Output**: AI diff summaries are rendered as a styled HTML page in the browser — gia outputs Markdown which is converted to HTML on the fly; below the summary the page shows a commit history card list and a full side-by-side diff (via diff2html, embedded inline — no CDN required), with collapsible file sections
@@ -29,24 +29,7 @@ A Rust CLI tool that generates visual representations of Git repository structur
 ## Prerequisites
 
 - Rust toolchain (1.70+)
-- **Graphviz**: Must be installed — `dot.exe` is called directly
-
-  | Platform | Command |
-  |----------|---------|
-  | Windows (winget) | `winget install --id Graphviz.Graphviz` |
-  | Windows (Chocolatey) | `choco install graphviz` |
-  | Windows (manual) | [graphviz.org/download](https://graphviz.org/download/) |
-  | macOS | `brew install graphviz` |
-  | Linux (Debian/Ubuntu) | `sudo apt install graphviz` |
-
-  On Windows, GGV searches for `dot.exe` automatically in the standard installation directories.
-  If installed in a non-standard location, set the `GRAPHVIZ_DOT` environment variable:
-
-  ```bat
-  set GRAPHVIZ_DOT=C:\MyTools\Graphviz\bin\dot.exe
-  ```
-
-- **gia** (optional): Required for AI diff summaries (`-w -a`). Must be available in `PATH`.
+- **gia** (optional): Required for AI diff summaries. Must be available in `PATH`.
   See [github.com/panjamo/gia](https://github.com/panjamo/gia).
 
 ![Sample Git Graph](doc/ggv-gia.svg)
@@ -75,15 +58,13 @@ ggv [OPTIONS]
 Options:
   -r, --repo-path <PATH>    Path to Git repository [default: .]
   -o, --output <FILE>       Output DOT file path [default: ggv-<repo-name>.dot]
-  -n, --no-show             Skip SVG generation and opening
+  -n, --no-show             Generate DOT file and start web server without opening the browser
   -f, --filter <CHARS>      Ref types: b=branches, r=remotes, t=tags, h=head [default: brt]
   -g, --gitlab-url <URL>    Base URL for compare links — GitLab or GitHub (auto-detected)
   -F, --from <COMMIT>       Limit graph to this commit and its descendants
   -X, --no-fetch            Skip automatic 'git fetch --tags --prune'
-  -k, --keep-dot            Keep the intermediate DOT file after SVG generation
   -t, --theme <THEME>       Color theme: dark or light [default: dark]
   -c, --current-branch      Show only refs that are ancestors of HEAD
-  -s, --svg-only            Generate a standalone SVG without starting the web server
   -P, --web-port <PORT>     Port for the diff server (0 = OS-assigned) [default: 0]
   -p, --gia-prompt <TEXT>   Custom prompt passed to gia (overrides built-in default)
   -l, --lang <LOCALE>       Language locale for AI output (e.g. de-DE, en-US, fr-FR) [default: de-DE]
@@ -107,7 +88,7 @@ Generate graph for a specific repository:
 ggv -r /path/to/repo
 ```
 
-Generate DOT file only, no SVG:
+Generate DOT file and start web server without opening browser:
 
 ```bash
 ggv -n
@@ -117,12 +98,6 @@ Skip the automatic tag fetch (faster, offline):
 
 ```bash
 ggv -X
-```
-
-Keep the intermediate DOT file alongside the SVG:
-
-```bash
-ggv -k
 ```
 
 Show only local branches (no remotes, no tags):
@@ -172,18 +147,11 @@ ggv -F v1.0.0 -c
 
 ### Diff Web Server
 
-The diff web server starts automatically with every `ggv` run. The SVG is served via `http://[::1]:<port>/view` instead of opened as a file, enabling same-origin requests for the context menu. Clicking the blue edge count label triggers the configured diff action.
+The diff web server starts automatically with every `ggv` run. The SVG is served via `http://[::1]:<port>/view`, enabling same-origin requests for the context menu. Clicking the blue edge count label triggers the configured diff action.
 
 Left-clicking a count label opens `git difftool -d sha1 sha2` in your configured diff tool. Right-clicking a count label gives AI diff options. AI summaries use merge-base detection; commit metadata (author, date, refs, changed files) is passed to gia as additional context.
 
-To generate a plain SVG for sharing without starting the server:
-
-```bash
-ggv -s
-ggv --svg-only
-```
-
-Use a fixed port (useful when the SVG will be reopened later):
+Use a fixed port:
 
 ```bash
 ggv -P 8080
@@ -229,9 +197,8 @@ The process stays alive after the SVG is opened, serving requests until Ctrl+C. 
 
 ## Output
 
-1. **SVG file** (`ggv-<repo-name>.svg`): Visual graph opened automatically in your default viewer.
-   The intermediate DOT file is deleted after SVG generation unless `-k` is set.
-2. With `-n`: only the **DOT file** is written (`ggv-<repo-name>.dot`).
+1. **SVG file** (`ggv-<repo-name>.svg`): Visual graph generated in-browser via WASM and served by the local web server, opened automatically in your browser (unless `-n` is specified).
+2. **DOT file** (`ggv-<repo-name>.dot`): Intermediate Graphviz DOT file retained on disk.
 
 ### Graph Elements
 
@@ -277,17 +244,17 @@ Open the SVG in a browser to use all interactive features:
 | Hover an edge | Tooltip listing commits condensed into that range |
 | Click an edge | Opens the GitLab / GitHub compare view for that range |
 | Hover the blue edge count label | Tooltip listing the files changed between the two nodes |
-| Click the blue edge count label | Opens `git difftool` (requires web server, disabled by `-s`) |
-| Right-click the blue edge count label | Context menu with AI diff options: full diff+log, diff-only, log-only (requires web server, disabled by `-s`) |
+| Click the blue edge count label | Opens `git difftool` |
+| Right-click the blue edge count label | Context menu with AI diff options: full diff+log, diff-only, log-only |
 | Click a commit node | Copies the full 40-character SHA to the clipboard (amber flash confirms) |
 | Drag one commit node onto another | Opens the forge compare view for that range — always `older...newer` |
-| Ctrl + drag onto another node | Opens the diff web server diff for that range (requires `-w`) |
+| Ctrl + drag onto another node | Opens the diff web server diff for that range |
 | Hover the SVG background | Tooltip with repository name, branch, HEAD commit, author, and date |
-| Right-click a commit node | Context menu (requires web server, disabled by `-s`) |
+| Right-click a commit node | Context menu |
 
-#### Right-click context menu on commit nodes (requires `-w`)
+#### Right-click context menu on commit nodes
 
-When the diff web server is active, right-clicking any commit node opens a context menu:
+Right-clicking any commit node opens a context menu:
 
 | Item | Action |
 |------|--------|
@@ -308,14 +275,14 @@ When the diff web server is active, right-clicking any commit node opens a conte
 
 Branch and tag names are read directly from structured metadata embedded in the SVG — no text parsing heuristics.
 
-#### Right-click context menu on edge count labels (requires `-w`)
+#### Right-click context menu on edge count labels
 
 | Item | Action |
 |------|--------|
 | AI Summary of Changes | AI diff+log summary via gia — shown in a new browser tab |
 | AI Summary (diff only) | AI summary using only the diff, no commit log metadata |
 
-Drag-to-compare requires a forge URL (auto-detected or set via `-g`). The blue edge count labels and context menus are only active when the web server is running (default; disabled by `-s`). Left-clicking a count label always opens `git difftool`.
+Drag-to-compare requires a forge URL (auto-detected or set via `-g`). The web server runs automatically. Left-clicking a count label always opens `git difftool`.
 
 ## Development
 

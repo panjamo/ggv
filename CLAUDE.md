@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-GGV (Git Graph Visualizer) is a Rust CLI tool that generates Graphviz DOT files from Git repositories and converts them to SVG images for visualization. The tool analyzes Git commit history, branches, and tags to create a condensed visual representation showing only referenced commits (branch tips, tags, root, merge junctions).
+GGV (Git Graph Visualizer) is a Rust CLI tool that generates Graphviz DOT files from Git repositories and renders them to SVG in-browser via WASM. The tool analyzes Git commit history, branches, and tags to create a condensed visual representation showing only referenced commits (branch tips, tags, root, merge junctions).
 
 ## Development Commands
 
@@ -67,10 +67,9 @@ Always run the complete quality check sequence:
 - `build_html()` — assembles the full AI summary page; accepts an optional `diff_section` rendered below the Markdown summary card
 - diff2html CSS and JS are embedded as Rust string constants (no CDN dependency)
 
-**Utility Functions (`main.rs`)**
-- `find_dot_executable()` — locates `dot.exe` by checking (in order): `GRAPHVIZ_DOT` env var, common Windows installation directories, then `where`/`which` fallback
-- `generate_svg()` — calls `dot.exe` directly via `std::process::Command -Tsvg`; prints the resolved path
-- `open_file()` — cross-platform file opening (Windows: `cmd /C start`, macOS: `open`, Linux: `xdg-open`)
+**Utility Functions (`graphviz.rs` and `utils.rs`)**
+- `enhance_svg()` — injects interactive JavaScript into SVG for drag-to-compare, context menus, and clipboard operations
+- `open_file()` — cross-platform file/URL opening (Windows: `cmd /C start`, macOS: `open`, Linux: `xdg-open`)
 - `time_ago()` — human-readable relative timestamps for tooltips
 - `repo_name_from_path()` — derives the default output filename from the repository folder name
 
@@ -79,9 +78,10 @@ Always run the complete quality check sequence:
 2. Collect referenced commits for each enabled ref type (branches, remotes, tags, HEAD)
 3. Add root commits and tag associations; mark branch tips and current checkout
 4. Build condensed graph: keep only referenced commits plus necessary merge-junction commits
-5. Pre-compute condensed parent edges and GitLab compare URLs
+5. Pre-compute condensed parent edges and forge (GitLab/GitHub) compare URLs
 6. Write DOT file with styled nodes and edges
-7. Unless `--no-show`: call `dot.exe` to convert DOT → SVG, delete the DOT file, open SVG
+7. Start web server that renders DOT → SVG in-browser via @hpcc-js/wasm-graphviz (WASM)
+8. Unless `--no-show`: open browser to view the rendered SVG
 
 ### Dependencies
 - `git2` — Git repository access and commit traversal
@@ -91,8 +91,5 @@ Always run the complete quality check sequence:
 - `dirs` — Resolves the user home directory for config file paths
 
 ### External Requirements
-- **Graphviz** must be installed (`dot.exe` / `dot`). GGV searches for it automatically:
-  - Checks `GRAPHVIZ_DOT` environment variable first
-  - Windows: tries `C:\Program Files\Graphviz\bin\dot.exe`, `C:\Program Files (x86)\Graphviz\bin\dot.exe`, `C:\Graphviz\bin\dot.exe`, then `where dot`
-  - macOS/Linux: uses `which dot`
-  - Install: `winget install --id Graphviz.Graphviz` (Windows) or `brew install graphviz` (macOS)
+- **@hpcc-js/wasm-graphviz** (WASM): Loaded automatically from CDN in the browser - no local installation required
+- **gia** (optional): Required for AI diff summaries. Must be available in `PATH`. See [github.com/panjamo/gia](https://github.com/panjamo/gia)

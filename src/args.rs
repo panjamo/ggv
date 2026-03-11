@@ -45,7 +45,7 @@ pub struct Args {
     #[arg(
         short = 'X',
         long,
-        help = "Skip automatic 'git fetch --tags' before generating the graph",
+        help = "Skip automatic 'git fetch --tags --prune' before generating the graph",
         action = clap::ArgAction::SetTrue
     )]
     pub no_fetch: bool,
