@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write as IoWrite};
+use std::io::{BufRead, BufReader, Read, Write as IoWrite};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -10,7 +10,6 @@ use pulldown_cmark::{html, Options, Parser as MdParser};
 
 use crate::filter::RefFilter;
 use crate::graph::GitGraphviz;
-use crate::graphviz::generate_svg;
 use crate::theme::Theme;
 
 /// All parameters needed to regenerate the DOT+SVG after a git operation.
@@ -23,7 +22,6 @@ pub struct RegenerateConfig {
     pub theme: Theme,
     pub current_branch_only: bool,
     pub no_fetch: bool,
-    pub keep_dot: bool,
     /// Filled in by `start()` once the port is known.
     pub web_server_url: String,
 }
@@ -53,21 +51,7 @@ fn regenerate(config: &RegenerateConfig) {
         eprintln!("Regenerate: failed to generate DOT: {e}");
         return;
     }
-    let ws_url = if config.web_server_url.is_empty() {
-        None
-    } else {
-        Some(config.web_server_url.as_str())
-    };
-    let repo_name = crate::utils::repo_name_from_path(&config.repo_path);
-    match generate_svg(&config.dot_path, git_viz.forge_url(), ws_url, &repo_name) {
-        Ok(_) => {
-            if !config.keep_dot {
-                let _ = std::fs::remove_file(&config.dot_path);
-            }
-            eprintln!("SVG regenerated.");
-        }
-        Err(e) => eprintln!("Regenerate: SVG generation failed: {e}"),
-    }
+    eprintln!("DOT regenerated.");
 }
 
 const DEFAULT_DIFF_PROMPT: &str = "You are an experienced software engineer performing a PR review.
@@ -151,7 +135,7 @@ const WATCHDOG_INTERVAL_SECS: u64 = 10;
 pub fn start(
     port: u16,
     repo_path: String,
-    svg_path: String,
+    dot_path: String,
     prompt: Option<String>,
     lang: String,
     gia_audio: bool,
@@ -195,7 +179,7 @@ pub fn start(
         run_server(
             listener,
             &repo_path,
-            &svg_path,
+            &dot_path,
             prompt,
             &lang,
             gia_audio,
@@ -212,7 +196,7 @@ pub fn start(
 fn run_server(
     listener: TcpListener,
     repo_path: &str,
-    svg_path: &str,
+    dot_path: &str,
     prompt: Option<String>,
     lang: &str,
     gia_audio: bool,
@@ -225,7 +209,7 @@ fn run_server(
         match stream {
             Ok(stream) => {
                 let repo_clone = repo_path.to_string();
-                let svg_clone = svg_path.to_string();
+                let dot_clone = dot_path.to_string();
                 let prompt_clone = prompt.clone();
                 let lang_clone = lang.to_string();
                 let regen_clone = regen.clone();
@@ -234,7 +218,7 @@ fn run_server(
                     handle_connection(
                         stream,
                         &repo_clone,
-                        &svg_clone,
+                        &dot_clone,
                         prompt_clone,
                         &lang_clone,
                         gia_audio,
@@ -254,7 +238,7 @@ fn run_server(
 fn handle_connection(
     mut stream: TcpStream,
     repo_path: &str,
-    svg_path: &str,
+    dot_path: &str,
     prompt: Option<String>,
     lang: &str,
     gia_audio: bool,
@@ -263,25 +247,87 @@ fn handle_connection(
     last_hb: Arc<AtomicU64>,
     max_diff_files: usize,
 ) {
-    let reader = BufReader::new(match stream.try_clone() {
+    let mut reader = BufReader::new(match stream.try_clone() {
         Ok(s) => s,
         Err(_) => return,
     });
-    let request_line = match reader.lines().next() {
-        Some(Ok(line)) => line,
-        _ => return,
-    };
+
+    let mut request_line = String::new();
+    if reader.read_line(&mut request_line).is_err() {
+        return;
+    }
+    let request_line = request_line.trim_end_matches(['\r', '\n']);
 
     let parts: Vec<&str> = request_line.splitn(3, ' ').collect();
-    if parts.len() < 2 || parts[0] != "GET" {
+    if parts.len() < 2 {
         return;
     }
 
+    let method = parts[0];
     let path_and_query = parts[1];
     let (path, query) = match path_and_query.find('?') {
         Some(idx) => (&path_and_query[..idx], &path_and_query[idx + 1..]),
         None => (path_and_query, ""),
     };
+
+    // Read headers to find Content-Length (needed for POST body)
+    let mut content_length: usize = 0;
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        let line = line.trim_end_matches(['\r', '\n']);
+        if line.is_empty() {
+            break;
+        }
+        if line.to_ascii_lowercase().starts_with("content-length:") {
+            content_length = line[15..].trim().parse().unwrap_or(0);
+        }
+    }
+
+    // Handle POST /save-svg: receive SVG from browser, enhance, write to disk, exit
+    if method == "POST" && path == "/save-svg" {
+        let mut body = vec![0u8; content_length];
+        if reader.read_exact(&mut body).is_err() {
+            send_response(&mut stream, 400, "text/plain", "Failed to read body");
+            return;
+        }
+        let svg_raw = String::from_utf8_lossy(&body);
+        let forge_url = regen.as_ref().and_then(|r| r.gitlab_url.as_deref());
+        let enhanced = crate::graphviz::enhance_svg(&svg_raw, forge_url, None);
+        let svg_path = std::path::Path::new(dot_path).with_extension("svg");
+        match std::fs::write(&svg_path, enhanced.as_bytes()) {
+            Ok(_) => {
+                println!("SVG saved: {}", svg_path.display());
+                send_response(&mut stream, 200, "text/plain", "OK");
+            }
+            Err(e) => {
+                eprintln!("Failed to save SVG: {e}");
+                send_response(&mut stream, 500, "text/plain", &e.to_string());
+            }
+        }
+        std::process::exit(0);
+    }
+
+    // Handle POST /enhance-svg: receive SVG from browser, inject interactive JS, return
+    if method == "POST" && path == "/enhance-svg" {
+        let mut body = vec![0u8; content_length];
+        if reader.read_exact(&mut body).is_err() {
+            send_response(&mut stream, 400, "text/plain", "Failed to read body");
+            return;
+        }
+        let svg_raw = String::from_utf8_lossy(&body);
+        let forge_url = regen.as_ref().and_then(|r| r.gitlab_url.as_deref());
+        let enhanced = crate::graphviz::enhance_svg(&svg_raw, forge_url, None);
+        send_response(&mut stream, 200, "image/svg+xml; charset=utf-8", &enhanced);
+        return;
+    }
+
+    if method != "GET" {
+        return;
+    }
 
     match path {
         "/heartbeat" => {
@@ -292,12 +338,22 @@ fn handle_connection(
             last_hb.store(now, Ordering::Relaxed);
             send_response(&mut stream, 200, "text/plain", "OK");
         }
+        "/autosave" => serve_autosave(&mut stream),
+        "/dot" => match std::fs::read_to_string(dot_path) {
+            Ok(dot) => send_response(&mut stream, 200, "text/plain; charset=utf-8", &dot),
+            Err(_) => send_response(&mut stream, 404, "text/plain", "DOT not yet available"),
+        },
         "/view" => {
             let repo_name = crate::utils::repo_name_from_path(repo_path);
-            serve_svg(&mut stream, svg_path, &repo_name);
+            let forge_url = regen.as_ref().and_then(|r| r.gitlab_url.as_deref());
+            let ws_url = regen
+                .as_ref()
+                .map(|r| r.web_server_url.as_str())
+                .unwrap_or("");
+            serve_view(&mut stream, &repo_name, forge_url, ws_url);
         }
         "/version" => {
-            let version = svg_mtime(svg_path);
+            let version = dot_mtime(dot_path);
             send_response(&mut stream, 200, "text/plain", &version);
         }
         "/checkout" => {
@@ -647,8 +703,8 @@ fn handle_connection(
     }
 }
 
-fn svg_mtime(svg_path: &str) -> String {
-    std::fs::metadata(svg_path)
+fn dot_mtime(dot_path: &str) -> String {
+    std::fs::metadata(dot_path)
         .and_then(|m| m.modified())
         .map(|t| {
             t.duration_since(std::time::UNIX_EPOCH)
@@ -659,22 +715,16 @@ fn svg_mtime(svg_path: &str) -> String {
         .unwrap_or_else(|_| "0".to_string())
 }
 
-fn serve_svg(stream: &mut TcpStream, svg_path: &str, repo_name: &str) {
-    let svg_content = match std::fs::read_to_string(svg_path) {
-        Ok(c) => c,
-        Err(_) => {
-            send_response(stream, 404, "text/plain", "SVG not yet available");
-            return;
-        }
-    };
-    // Strip XML declaration / DOCTYPE — only keep from <svg onward
-    let svg_body = if let Some(pos) = svg_content.find("<svg") {
-        &svg_content[pos..]
-    } else {
-        svg_content.as_str()
-    };
-    // Inline SVG favicon: three commits (green main branch) + one branch commit (blue)
+fn serve_view(stream: &mut TcpStream, repo_name: &str, forge_url: Option<&str>, ws_url: &str) {
     let favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cline x1='5' y1='1' x2='5' y2='15' stroke='%234ade80' stroke-width='1.5'/%3E%3Cline x1='5' y1='5' x2='11' y2='11' stroke='%2360a5fa' stroke-width='1.5'/%3E%3Ccircle cx='5' cy='2' r='2' fill='%234ade80'/%3E%3Ccircle cx='5' cy='6' r='2' fill='%234ade80'/%3E%3Ccircle cx='5' cy='14' r='2' fill='%234ade80'/%3E%3Ccircle cx='11' cy='11' r='2' fill='%2360a5fa'/%3E%3C/svg%3E";
+    let forge_url_js = forge_url.map_or("null".to_string(), |u| {
+        format!("\"{}\"", u.replace('\\', "\\\\").replace('"', "\\\""))
+    });
+    let ws_url_js = if ws_url.is_empty() {
+        "null".to_string()
+    } else {
+        format!("\"{}\"", ws_url.replace('\\', "\\\\").replace('"', "\\\""))
+    };
     let html = format!(
         r#"<!DOCTYPE html>
 <html>
@@ -685,29 +735,451 @@ fn serve_svg(stream: &mut TcpStream, svg_path: &str, repo_name: &str) {
 <style>
   body {{ margin: 0; background: #1a1f2e; overflow: auto; }}
   svg {{ display: block; }}
+  #ggv-loading {{ position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#718096;font-family:'Segoe UI',sans-serif;font-size:14px; }}
 </style>
 <script>
-(function() {{
-  var v = null;
-  function poll() {{
-    fetch('/version').then(function(r) {{ return r.text(); }}).then(function(nv) {{
-      if (v === null) {{ v = nv; }}
-      else if (nv !== v) {{ location.reload(); }}
-    }}).catch(function() {{}});
+var GGV_FORGE_URL = {forge_url_js};
+var GGV_WS_URL = {ws_url_js};
+function showCopiedToast(text) {{
+  var toast = document.getElementById('ggv-toast');
+  if (!toast) {{
+    toast = document.createElement('div');
+    toast.id = 'ggv-toast';
+    toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);pointer-events:none;font-family:"Segoe UI",sans-serif;font-size:11px;color:#718096;padding:3px 8px;';
+    document.body.appendChild(toast);
   }}
-  setInterval(poll, 1500);
-  poll();
-  setInterval(function() {{ fetch('/heartbeat').catch(function(){{}}); }}, 2000);
-}})();
+  toast.textContent = 'Copied SHA-1 Hash to clipboard: ' + text.slice(0, 8) + '\u2026';
+  toast.style.transition = 'none';
+  toast.style.opacity = '1';
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(function() {{
+    toast.style.transition = 'opacity 0.4s';
+    toast.style.opacity = '0';
+  }}, 1500);
+}}
+function copyHash(el) {{
+  if (window._dragJustHappened) {{ window._dragJustHappened = false; return; }}
+  var t = el.querySelector('title');
+  if (!t) return;
+  var sha = t.textContent.trim();
+  if (!/^[0-9a-f]{{40}}$/.test(sha)) return;
+  navigator.clipboard.writeText(sha).then(function() {{
+    el.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s) {{
+      var orig = s.getAttribute('stroke');
+      s.setAttribute('stroke', '#f59e0b');
+      setTimeout(function() {{ s.setAttribute('stroke', orig); }}, 500);
+    }});
+    showCopiedToast(sha);
+  }});
+}}
+function ggvFilterParam() {{
+  var f = (typeof localStorage !== 'undefined') ? localStorage.getItem('ggv-diff-filter') || '' : '';
+  return f ? '&filter=' + encodeURIComponent(f) : '';
+}}
+function initGgv() {{
+  var forgeUrl = GGV_FORGE_URL;
+  var wsUrl = GGV_WS_URL;
+  // Add click + cursor to nodes (WASM SVG has no onclick attrs)
+  document.querySelectorAll('g.node').forEach(function(g) {{
+    g.style.cursor = 'pointer';
+    g.addEventListener('click', function() {{ copyHash(g); }});
+  }});
+  // Offset edge count labels; set file-list tooltip
+  document.querySelectorAll('g.edge').forEach(function(g) {{
+    var id = g.getAttribute('id') || '';
+    var fileList = id.startsWith('files:') ? id.slice(6).split('|').join('\n') : '';
+    g.querySelectorAll('text').forEach(function(t) {{
+      var x = parseFloat(t.getAttribute('x') || 0);
+      t.setAttribute('x', x + 10);
+      if (/^\d+$/.test(t.textContent.trim())) {{
+        t.setAttribute('data-ggv-count', '1');
+        var fileCount = fileList ? fileList.split('\n').filter(Boolean).length : 0;
+        var base = parseFloat(t.getAttribute('font-size')) || 10;
+        var scaled = base + Math.round(Math.sqrt(Math.max(0, fileCount - 1)) * 1.5);
+        if (scaled > base) {{ t.setAttribute('font-size', scaled); }}
+        if (fileList) {{
+          var titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+          titleEl.textContent = fileList;
+          t.appendChild(titleEl);
+        }}
+      }}
+    }});
+  }});
+  // Drag-to-compare
+  if (forgeUrl) {{
+    document.querySelectorAll('g.node').forEach(function(g) {{ g.style.cursor = 'grab'; }});
+    var drag = null;
+    var hlTarget = null, hlStrokes = [];
+    function clearHL() {{
+      if (!hlTarget) return;
+      hlTarget.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s, i) {{
+        if (hlStrokes[i] !== undefined) s.setAttribute('stroke', hlStrokes[i]);
+      }});
+      hlTarget = null; hlStrokes = [];
+    }}
+    function setHL(g) {{
+      clearHL(); hlTarget = g;
+      g.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s) {{
+        hlStrokes.push(s.getAttribute('stroke') || '');
+        s.setAttribute('stroke', '#3B82F6');
+      }});
+    }}
+    function nodeAt(x, y, skip) {{
+      var els = document.elementsFromPoint(x, y);
+      for (var i = 0; i < els.length; i++) {{
+        var g = els[i].closest && els[i].closest('g.node');
+        if (g && g !== skip) return g;
+      }}
+      return null;
+    }}
+    document.querySelectorAll('g.node').forEach(function(g) {{
+      g.addEventListener('pointerdown', function(e) {{
+        if (e.button !== 0) return;
+        var t = g.querySelector('title');
+        if (!t) return;
+        var sha = t.textContent.trim();
+        if (!/^[0-9a-f]{{40}}$/.test(sha)) return;
+        drag = {{sha: sha, el: g, x0: e.clientX, y0: e.clientY, moved: false}};
+        e.preventDefault();
+      }});
+    }});
+    document.addEventListener('pointermove', function(e) {{
+      if (!drag) return;
+      var dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+      if (!drag.moved && Math.sqrt(dx*dx + dy*dy) > 6) {{
+        drag.moved = true;
+        drag.el.style.opacity = '0.5';
+        document.documentElement.style.cursor = 'crosshair';
+      }}
+      if (drag.moved) {{
+        var target = nodeAt(e.clientX, e.clientY, drag.el);
+        if (target) setHL(target); else clearHL();
+      }}
+    }});
+    document.addEventListener('pointerup', function(e) {{
+      if (!drag) return;
+      var wasMoved = drag.moved;
+      drag.el.style.opacity = '';
+      document.documentElement.style.cursor = '';
+      clearHL();
+      if (wasMoved) {{
+        window._dragJustHappened = true;
+        var target = nodeAt(e.clientX, e.clientY, drag.el);
+        if (target) {{
+          var t = target.querySelector('title');
+          if (t) {{
+            var tsha = t.textContent.trim();
+            if (/^[0-9a-f]{{40}}$/.test(tsha)) {{
+              var dragY = drag.el.getBoundingClientRect().top;
+              var targetY = target.getBoundingClientRect().top;
+              var fromSha = dragY > targetY ? drag.sha : tsha;
+              var toSha   = dragY > targetY ? tsha : drag.sha;
+              var seg = forgeUrl.indexOf('github.com') >= 0 ? '/compare/' : '/-/compare/';
+              window.open(forgeUrl + seg + fromSha + '...' + toSha, '_blank');
+            }}
+          }}
+        }}
+      }}
+      drag = null;
+    }});
+    document.addEventListener('pointercancel', function() {{
+      if (!drag) return;
+      drag.el.style.opacity = '';
+      document.documentElement.style.cursor = '';
+      clearHL();
+      drag = null;
+    }});
+  }}
+  // Edge count labels: clickable when web server active
+  if (wsUrl) {{
+    document.querySelectorAll('g.edge').forEach(function(g) {{
+      var title = g.querySelector('title');
+      if (!title) return;
+      var m = title.textContent.match(/^([0-9a-f]{{40}})->([0-9a-f]{{40}})$/);
+      if (!m) return;
+      var fromSha = m[1], toSha = m[2];
+      g.querySelectorAll('text').forEach(function(t) {{
+        if (!t.getAttribute('data-ggv-count')) return;
+        t.style.cursor = 'pointer';
+        t.style.fill = '#60a5fa';
+        t.addEventListener('click', function(e) {{
+          e.stopPropagation();
+          e.preventDefault();
+          window.open(wsUrl + '/diff2html?from=' + fromSha + '&to=' + toSha + ggvFilterParam(), '_blank');
+        }});
+      }});
+    }});
+  }}
+  // Right-click context menu on nodes
+  if (wsUrl) {{
+    var ctxMenu = null;
+    function removeCtxMenu() {{
+      if (ctxMenu) {{ ctxMenu.remove(); ctxMenu = null; }}
+    }}
+    document.addEventListener('click', removeCtxMenu);
+    document.addEventListener('keydown', function(e) {{ if (e.key === 'Escape') removeCtxMenu(); }});
+    function makeMenuItem(label, action) {{
+      var item = document.createElement('div');
+      item.textContent = label;
+      item.style.cssText = 'padding:8px 16px;cursor:pointer;color:#e2e8f0;font-size:13px;white-space:nowrap;';
+      item.addEventListener('mouseenter', function() {{ item.style.background = '#2d3748'; }});
+      item.addEventListener('mouseleave', function() {{ item.style.background = ''; }});
+      item.addEventListener('click', function(ev) {{ ev.stopPropagation(); removeCtxMenu(); action(); }});
+      return item;
+    }}
+    function makeDivider() {{
+      var d = document.createElement('div');
+      d.style.cssText = 'border-top:1px solid #2d3748;margin:4px 0;';
+      return d;
+    }}
+    function parseNodeId(id) {{
+      var local = [], remote = [], tags = [];
+      var lm = id.match(/~L~([^~]*)/); if (lm) local  = lm[1].split(',').filter(Boolean);
+      var rm = id.match(/~R~([^~]*)/); if (rm) remote = rm[1].split(',').filter(Boolean);
+      var tm = id.match(/~T~([^~]*)/); if (tm) tags   = tm[1].split(',').filter(Boolean);
+      return {{ local: local, remote: remote, tags: tags }};
+    }}
+    var pinSha = null;
+    var pinEl = null;
+    var pinStrokes = [];
+    function setPinHL(g) {{
+      clearPinHL();
+      pinEl = g;
+      g.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s) {{
+        pinStrokes.push(s.getAttribute('stroke') || '');
+        s.setAttribute('stroke', '#f59e0b');
+      }});
+    }}
+    function clearPinHL() {{
+      if (!pinEl) return;
+      pinEl.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s, i) {{
+        if (pinStrokes[i] !== undefined) s.setAttribute('stroke', pinStrokes[i]);
+      }});
+      pinEl = null; pinStrokes = [];
+    }}
+    var secondEl = null;
+    var secondStrokes = [];
+    function setSecondHL(g) {{
+      clearSecondHL();
+      secondEl = g;
+      g.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s) {{
+        secondStrokes.push(s.getAttribute('stroke') || '');
+        s.setAttribute('stroke', '#34d399');
+      }});
+    }}
+    function clearSecondHL() {{
+      if (!secondEl) return;
+      secondEl.querySelectorAll('polygon,ellipse,path,rect').forEach(function(s, i) {{
+        if (secondStrokes[i] !== undefined) s.setAttribute('stroke', secondStrokes[i]);
+      }});
+      secondEl = null; secondStrokes = [];
+    }}
+    document.querySelectorAll('g.node').forEach(function(g) {{
+      g.addEventListener('contextmenu', function(e) {{
+        e.preventDefault();
+        removeCtxMenu();
+        var t = g.querySelector('title');
+        if (!t) return;
+        var sha = t.textContent.trim();
+        if (!/^[0-9a-f]{{40}}$/.test(sha)) return;
+        var refs = parseNodeId(g.getAttribute('id') || '');
+        ctxMenu = document.createElement('div');
+        ctxMenu.style.cssText = 'position:fixed;left:' + e.clientX + 'px;top:' + e.clientY + 'px;background:#1a1f2e;border:1px solid #2d3748;border-radius:8px;padding:4px 0;z-index:9999;min-width:180px;box-shadow:0 8px 24px rgba(0,0,0,0.6);font-family:"Segoe UI",sans-serif;';
+        ctxMenu.addEventListener('click', function(ev) {{ ev.stopPropagation(); }});
+        ctxMenu.appendChild(makeMenuItem(pinSha && pinSha !== sha ? 'Change First Node' : 'Select as First Node', function() {{
+          clearPinHL();
+          pinSha = sha;
+          setPinHL(g);
+        }}));
+        if (pinSha === sha) {{
+          ctxMenu.appendChild(makeMenuItem('Clear First Node Selection', function() {{
+            clearPinHL();
+            clearSecondHL();
+            pinSha = null;
+          }}));
+        }}
+        if (pinSha && pinSha !== sha) {{
+          var pinShort = pinSha.slice(0, 7);
+          var myShort = sha.slice(0, 7);
+          var range = pinShort + ' \u2194 ' + myShort;
+          var myTop = g.getBoundingClientRect().top;
+          var pTop = pinEl ? pinEl.getBoundingClientRect().top : 0;
+          var fromSha2 = pTop > myTop ? pinSha : sha;
+          var toSha2   = pTop > myTop ? sha : pinSha;
+          ctxMenu.appendChild(makeDivider());
+          ctxMenu.appendChild(makeMenuItem('View HTML Diff (diff2html) \u2013 ' + range, function() {{
+            setSecondHL(g);
+            window.open(wsUrl + '/diff2html?from=' + fromSha2 + '&to=' + toSha2 + ggvFilterParam(), '_blank');
+          }}));
+          ctxMenu.appendChild(makeMenuItem('Open in Diff Tool \u2013 ' + range, function() {{
+            setSecondHL(g);
+            window.open(wsUrl + '/diff?from=' + fromSha2 + '&to=' + toSha2, '_blank');
+          }}));
+          if (forgeUrl) {{
+            var fSeg = forgeUrl.indexOf('github.com') >= 0 ? '/compare/' : '/-/compare/';
+            ctxMenu.appendChild(makeMenuItem('Open Compare on GitLab \u2044 GitHub \u2013 ' + range, function() {{
+              setSecondHL(g);
+              window.open(forgeUrl + fSeg + fromSha2 + '...' + toSha2, '_blank');
+            }}));
+          }}
+          ctxMenu.appendChild(makeDivider());
+          ctxMenu.appendChild(makeMenuItem('AI: Summarize Changes \u2013 ' + range, function() {{
+            setSecondHL(g);
+            window.open(wsUrl + '/diff2html?from=' + fromSha2 + '&to=' + toSha2 + '&ai=1' + ggvFilterParam(), '_blank');
+          }}));
+          ctxMenu.appendChild(makeMenuItem('AI: Summarize Diff Only \u2013 ' + range, function() {{
+            setSecondHL(g);
+            window.open(wsUrl + '/diff2html?from=' + fromSha2 + '&to=' + toSha2 + '&ai=1&nolog=1' + ggvFilterParam(), '_blank');
+          }}));
+          ctxMenu.appendChild(makeMenuItem('AI: Summarize Commits \u2013 ' + range, function() {{
+            setSecondHL(g);
+            window.open(wsUrl + '/log-summary?from=' + fromSha2 + '&to=' + toSha2 + ggvFilterParam(), '_blank');
+          }}));
+          ctxMenu.appendChild(makeDivider());
+          ctxMenu.appendChild(makeMenuItem('Show Commit History \u2013 ' + range, function() {{
+            setSecondHL(g);
+            window.open(wsUrl + '/log?from=' + fromSha2 + '&to=' + toSha2, '_blank');
+          }}));
+        }}
+        ctxMenu.appendChild(makeDivider());
+        ctxMenu.appendChild(makeMenuItem('Copy Commit SHA', function() {{
+          navigator.clipboard.writeText(sha).then(function() {{ showCopiedToast(sha); }});
+        }}));
+        refs.local.forEach(function(name) {{
+          ctxMenu.appendChild(makeMenuItem('Copy Branch Name: ' + name, function() {{
+            navigator.clipboard.writeText(name).then(function() {{ showCopiedToast(name); }});
+          }}));
+        }});
+        refs.remote.forEach(function(name) {{
+          ctxMenu.appendChild(makeMenuItem('Copy Branch Name: ' + name, function() {{
+            navigator.clipboard.writeText(name).then(function() {{ showCopiedToast(name); }});
+          }}));
+        }});
+        refs.tags.forEach(function(name) {{
+          ctxMenu.appendChild(makeMenuItem('Copy Tag Name: ' + name, function() {{
+            navigator.clipboard.writeText(name).then(function() {{ showCopiedToast(name); }});
+          }}));
+        }});
+        if (refs.local.length > 0 || refs.remote.length > 0 || refs.tags.length > 0) {{
+          ctxMenu.appendChild(makeDivider());
+          refs.local.forEach(function(name) {{
+            ctxMenu.appendChild(makeMenuItem('Delete Local Branch: ' + name, function() {{
+              if (!confirm('Force-delete local branch "' + name + '"?')) return;
+              fetch(wsUrl + '/delete-branch?name=' + encodeURIComponent(name) + '&scope=local');
+            }}));
+          }});
+          refs.remote.forEach(function(name) {{
+            ctxMenu.appendChild(makeMenuItem('Delete Remote Branch: ' + name, function() {{
+              if (!confirm('Delete remote branch "' + name + '"?')) return;
+              fetch(wsUrl + '/delete-branch?name=' + encodeURIComponent(name) + '&scope=remote');
+            }}));
+          }});
+          refs.tags.forEach(function(name) {{
+            ctxMenu.appendChild(makeMenuItem('Delete Tag (local + remote): ' + name, function() {{
+              if (!confirm('Delete tag "' + name + '" locally and from all remotes?')) return;
+              fetch(wsUrl + '/delete-tag?name=' + encodeURIComponent(name));
+            }}));
+          }});
+        }}
+        ctxMenu.appendChild(makeDivider());
+        ctxMenu.appendChild(makeMenuItem('Checkout This Commit', function() {{
+          fetch(wsUrl + '/checkout?sha=' + sha);
+        }}));
+        document.body.appendChild(ctxMenu);
+      }});
+    }});
+    // Edge context menu
+    function showEdgeMenu(fromSha, toSha, x, y) {{
+      removeCtxMenu();
+      ctxMenu = document.createElement('div');
+      ctxMenu.style.cssText = 'position:fixed;left:' + x + 'px;top:' + y + 'px;background:#1a1f2e;border:1px solid #2d3748;border-radius:8px;padding:4px 0;z-index:9999;min-width:200px;box-shadow:0 8px 24px rgba(0,0,0,0.6);font-family:"Segoe UI",sans-serif;';
+      ctxMenu.addEventListener('click', function(ev) {{ ev.stopPropagation(); }});
+      if (forgeUrl) {{
+        var fSeg = forgeUrl.indexOf('github.com') >= 0 ? '/compare/' : '/-/compare/';
+        ctxMenu.appendChild(makeMenuItem('Open Compare on GitLab \u2044 GitHub', function() {{
+          window.open(forgeUrl + fSeg + fromSha + '...' + toSha, '_blank');
+        }}));
+        ctxMenu.appendChild(makeDivider());
+      }}
+      ctxMenu.appendChild(makeMenuItem('View HTML Diff (diff2html)', function() {{
+        window.open(wsUrl + '/diff2html?from=' + fromSha + '&to=' + toSha + ggvFilterParam(), '_blank');
+      }}));
+      ctxMenu.appendChild(makeMenuItem('Open in Diff Tool', function() {{
+        window.open(wsUrl + '/diff?from=' + fromSha + '&to=' + toSha, '_blank');
+      }}));
+      ctxMenu.appendChild(makeDivider());
+      ctxMenu.appendChild(makeMenuItem('AI: Summarize Changes', function() {{
+        window.open(wsUrl + '/diff2html?from=' + fromSha + '&to=' + toSha + '&ai=1' + ggvFilterParam(), '_blank');
+      }}));
+      ctxMenu.appendChild(makeMenuItem('AI: Summarize Commits', function() {{
+        window.open(wsUrl + '/log-summary?from=' + fromSha + '&to=' + toSha + ggvFilterParam(), '_blank');
+      }}));
+      ctxMenu.appendChild(makeDivider());
+      ctxMenu.appendChild(makeMenuItem('Show Commit History', function() {{
+        window.open(wsUrl + '/log?from=' + fromSha + '&to=' + toSha, '_blank');
+      }}));
+      document.body.appendChild(ctxMenu);
+    }}
+    document.querySelectorAll('g.edge').forEach(function(g) {{
+      var title = g.querySelector('title');
+      if (!title) return;
+      var m = title.textContent.match(/^([0-9a-f]{{40}})->([0-9a-f]{{40}})$/);
+      if (!m) return;
+      var fromSha = m[1], toSha = m[2];
+      g.addEventListener('contextmenu', function(e) {{
+        e.preventDefault();
+        e.stopPropagation();
+        showEdgeMenu(fromSha, toSha, e.clientX, e.clientY);
+      }});
+      g.querySelectorAll('text').forEach(function(t) {{
+        if (!t.getAttribute('data-ggv-count')) return;
+        t.addEventListener('contextmenu', function(e) {{
+          e.preventDefault();
+          e.stopPropagation();
+          showEdgeMenu(fromSha, toSha, e.clientX, e.clientY);
+        }});
+      }});
+    }});
+  }}
+}}
+</script>
+<script type="module">
+const loading = document.getElementById('ggv-loading');
+function showErr(msg) {{ if (loading) loading.textContent = 'Error: ' + msg; }}
+let graphviz;
+try {{
+  const {{ Graphviz }} = await import("https://cdn.jsdelivr.net/npm/@hpcc-js/wasm-graphviz/dist/index.js");
+  graphviz = await Graphviz.load();
+}} catch(e) {{ showErr('WASM load failed: ' + e); throw e; }}
+async function renderGraph() {{
+  const dot = await fetch('/dot').then(r => r.text());
+  const svg = await graphviz.dot(dot);
+  document.getElementById('ggv-graph').innerHTML = svg;
+  if (loading) loading.style.display = 'none';
+  initGgv();
+}}
+try {{ await renderGraph(); }} catch(e) {{ showErr(e); throw e; }}
+let v = null;
+setInterval(async () => {{
+  try {{
+    const nv = await fetch('/version').then(r => r.text());
+    if (v === null) {{ v = nv; }}
+    else if (nv !== v) {{ await renderGraph(); v = nv; }}
+  }} catch(e) {{}}
+}}, 1500);
+setInterval(() => fetch('/heartbeat').catch(() => {{}}), 2000);
 </script>
 </head>
-<body>{}
+<body>
+<div id="ggv-graph"></div>
+<div id="ggv-loading">Loading graph…</div>
 <div id="ggv-flt-bar" style="position:fixed;top:10px;right:10px;z-index:1000;display:flex;align-items:center;gap:6px;background:#1a1f2e;border:1px solid #2d3748;border-radius:6px;padding:5px 10px;font-family:'Segoe UI',sans-serif;font-size:12px;">
   <span style="color:#718096;white-space:nowrap;">Filter:</span>
   <input id="ggv-flt-inp" type="text" placeholder="*.cpp *.h" style="width:160px;padding:3px 6px;border:1px solid #2d3748;border-radius:4px;background:#0f1117;color:#e2e8f0;font-family:monospace;font-size:11px;">
   <button onclick="ggvSave()" style="padding:2px 8px;border-radius:4px;cursor:pointer;border:1px solid #2d3748;background:#1a1f2e;color:#e2e8f0;font-size:11px;">Set</button>
   <button onclick="ggvClear()" style="padding:2px 8px;border-radius:4px;cursor:pointer;border:1px solid #2d3748;background:#1a1f2e;color:#718096;font-size:11px;">✕</button>
   <span id="ggv-flt-ind" style="color:#f6ad55;font-size:10px;display:none;">●</span>
+  <button onclick="ggvDownloadSvg()" title="Save SVG" style="padding:2px 8px;border-radius:4px;cursor:pointer;border:1px solid #2d3748;background:#1a1f2e;color:#a0aec0;font-size:12px;font-family:monospace;line-height:1.4;" onmouseover="this.style.borderColor='#63b3ed';this.style.color='#63b3ed'" onmouseout="this.style.borderColor='#2d3748';this.style.color='#a0aec0'">&#x2B07;</button>
   <button onclick="ggvHelp()" title="Help  ?" style="padding:2px 8px;border-radius:4px;cursor:pointer;border:1px solid #2d3748;background:#1a1f2e;color:#a0aec0;font-size:12px;font-family:monospace;line-height:1.4;" onmouseover="this.style.borderColor='#63b3ed';this.style.color='#63b3ed'" onmouseout="this.style.borderColor='#2d3748';this.style.color='#a0aec0'">?</button>
 </div>
 <!-- ── Help overlay ── -->
@@ -845,6 +1317,23 @@ fn serve_svg(stream: &mut TcpStream, svg_path: &str, repo_name: &str) {
     inp.value = '';
     refresh();
   }};
+  window.ggvDownloadSvg = async function(){{
+    var svgEl = document.querySelector('#ggv-graph svg');
+    if (!svgEl) return;
+    var raw = new XMLSerializer().serializeToString(svgEl);
+    var enhanced;
+    try {{
+      var res = await fetch('/enhance-svg', {{method:'POST', headers:{{'Content-Type':'image/svg+xml'}}, body: raw}});
+      enhanced = res.ok ? await res.text() : raw;
+    }} catch(e) {{ enhanced = raw; }}
+    var blob = new Blob([enhanced], {{type: 'image/svg+xml'}});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = '{repo_name}.svg';
+    a.click();
+    URL.revokeObjectURL(url);
+  }};
   var overlay = document.getElementById('ggv-help-overlay');
   window.ggvHelp = function(){{
     var visible = overlay.style.display === 'flex';
@@ -859,9 +1348,34 @@ fn serve_svg(stream: &mut TcpStream, svg_path: &str, repo_name: &str) {
 </script>
 </body>
 </html>"#,
-        svg_body
+        repo_name = repo_name,
+        favicon = favicon,
+        forge_url_js = forge_url_js,
+        ws_url_js = ws_url_js,
     );
     send_response(stream, 200, "text/html; charset=utf-8", &html);
+}
+
+fn serve_autosave(stream: &mut TcpStream) {
+    let html = r#"<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Saving SVG…</title>
+<style>body{background:#1a1f2e;color:#718096;font-family:'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-size:14px;}</style>
+</head><body><p id="s">Loading WASM…</p>
+<script type="module">
+const s = document.getElementById('s');
+try {
+  s.textContent = 'Loading WASM…';
+  const { Graphviz } = await import("https://cdn.jsdelivr.net/npm/@hpcc-js/wasm-graphviz/dist/index.js");
+  const graphviz = await Graphviz.load();
+  s.textContent = 'Rendering…';
+  const dot = await fetch('/dot').then(r => r.text());
+  const svg = await graphviz.dot(dot);
+  s.textContent = 'Saving…';
+  const res = await fetch('/save-svg', {method:'POST', headers:{'Content-Type':'image/svg+xml','Content-Length':new TextEncoder().encode(svg).length}, body: svg});
+  if (res.ok) { s.textContent = 'SVG saved.'; } else { s.textContent = 'Error: ' + await res.text(); }
+} catch(e) { s.textContent = 'Error: ' + e; }
+</script></body></html>"#;
+    send_response(stream, 200, "text/html; charset=utf-8", html);
 }
 
 fn run_git_checkout(repo_path: &str, sha: &str) {

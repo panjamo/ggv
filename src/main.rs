@@ -12,7 +12,7 @@ use args::Args;
 use clap::Parser;
 use filter::RefFilter;
 use graph::GitGraphviz;
-use graphviz::{generate_svg, open_file};
+use graphviz::open_file;
 use utils::repo_name_from_path;
 
 fn fetch_tags(repo_path: &str) -> Result<()> {
@@ -54,11 +54,6 @@ fn main() -> Result<()> {
         None => format!("ggv-{}.dot", &repo_name),
     });
 
-    let svg_path = std::path::Path::new(&output)
-        .with_extension("svg")
-        .to_string_lossy()
-        .to_string();
-
     // Create git_viz first so that auto-detected gitlab_url is available for the web server.
     let from_clone = args.from.clone();
     let filter = RefFilter::from_string(&args.filter);
@@ -71,58 +66,38 @@ fn main() -> Result<()> {
         args.current_branch,
     )?;
 
-    let (server_handle, web_server_url) = if args.web_server {
-        let regen = web_server::RegenerateConfig {
-            repo_path: args.repo_path.clone(),
-            dot_path: output.clone(),
-            filter: args.filter.clone(),
-            gitlab_url: git_viz.forge_url().map(String::from),
-            from_commit: from_clone,
-            theme: args.theme,
-            current_branch_only: args.current_branch,
-            no_fetch: args.no_fetch,
-            keep_dot: args.keep_dot,
-            web_server_url: String::new(), // filled in by start()
-        };
-        let (handle, port) = web_server::start(
-            args.web_port,
-            args.repo_path.clone(),
-            svg_path.clone(),
-            args.gia_prompt,
-            args.lang,
-            args.gia_audio,
-            args.theme,
-            Some(regen),
-            args.max_diff_files,
-        )
-        .context("Failed to start diff web server")?;
-        (Some(handle), Some(web_server::base_url(port)))
-    } else {
-        (None, None)
-    };
     git_viz.generate_dot(&output)?;
 
-    if !args.no_show {
-        let generated_svg = generate_svg(
-            &output,
-            git_viz.forge_url(),
-            web_server_url.as_deref(),
-            &repo_name,
-        )?;
-        if !args.keep_dot {
-            std::fs::remove_file(&output)
-                .with_context(|| format!("Failed to delete DOT file: {}", output))?;
-        }
-        if let Some(ref ws_url) = web_server_url {
-            open_file(&format!("{}/view", ws_url))?;
-        } else {
-            open_file(&generated_svg)?;
-        }
-    }
-
-    if let Some(handle) = server_handle {
-        handle.join().ok();
-    }
-
+    let regen = Some(web_server::RegenerateConfig {
+        repo_path: args.repo_path.clone(),
+        dot_path: output.clone(),
+        filter: args.filter.clone(),
+        gitlab_url: git_viz.forge_url().map(String::from),
+        from_commit: from_clone,
+        theme: args.theme,
+        current_branch_only: args.current_branch,
+        no_fetch: args.no_fetch,
+        web_server_url: String::new(), // filled in by start()
+    });
+    let (handle, port) = web_server::start(
+        args.web_port,
+        args.repo_path.clone(),
+        output.clone(),
+        args.gia_prompt,
+        args.lang,
+        args.gia_audio,
+        args.theme,
+        regen,
+        args.max_diff_files,
+    )
+    .context("Failed to start web server")?;
+    let ws_url = web_server::base_url(port);
+    let target = if args.no_show {
+        format!("{}/autosave", ws_url)
+    } else {
+        format!("{}/view", ws_url)
+    };
+    open_file(&target)?;
+    handle.join().ok();
     Ok(())
 }
