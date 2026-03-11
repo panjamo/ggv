@@ -17,7 +17,7 @@ pub struct Args {
     )]
     pub output: Option<String>,
 
-    #[arg(short = 'n', long, help = "Skip SVG generation and opening", action = clap::ArgAction::SetTrue)]
+    #[arg(short = 'n', long, help = "Generate DOT file and start web server without opening the browser", action = clap::ArgAction::SetTrue)]
     pub no_show: bool,
 
     #[arg(
@@ -51,14 +51,6 @@ pub struct Args {
     pub no_fetch: bool,
 
     #[arg(
-        short = 'k',
-        long,
-        help = "Keep the intermediate DOT file after SVG generation",
-        action = clap::ArgAction::SetTrue
-    )]
-    pub keep_dot: bool,
-
-    #[arg(
         short = 't',
         long,
         help = "Color theme: dark or light [default: dark]",
@@ -74,15 +66,6 @@ pub struct Args {
         action = clap::ArgAction::SetTrue
     )]
     pub current_branch: bool,
-
-    #[arg(
-        short = 's',
-        long = "svg-only",
-        help = "Generate a standalone SVG for sharing without starting the web server",
-        action = clap::ArgAction::SetFalse,
-        default_value_t = true
-    )]
-    pub web_server: bool,
 
     #[arg(
         short = 'P',
