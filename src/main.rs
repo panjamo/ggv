@@ -37,21 +37,25 @@ fn main() -> Result<()> {
     }
 
     let repo_name = repo_name_from_path(&args.repo_path);
-    let output = args.output.unwrap_or_else(|| match &args.from {
-        Some(from) => {
-            let safe_from: String = from
-                .chars()
-                .map(|c| {
-                    if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                        c
-                    } else {
-                        '-'
-                    }
-                })
-                .collect();
-            format!("ggv-{}-from-{}.dot", &repo_name, safe_from)
-        }
-        None => format!("ggv-{}.dot", &repo_name),
+    let output = args.output.unwrap_or_else(|| {
+        let temp_dir = std::env::temp_dir();
+        let filename = match &args.from {
+            Some(from) => {
+                let safe_from: String = from
+                    .chars()
+                    .map(|c| {
+                        if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                            c
+                        } else {
+                            '-'
+                        }
+                    })
+                    .collect();
+                format!("ggv-{}-from-{}.dot", &repo_name, safe_from)
+            }
+            None => format!("ggv-{}.dot", &repo_name),
+        };
+        temp_dir.join(&filename).to_string_lossy().to_string()
     });
 
     // Create git_viz first so that auto-detected gitlab_url is available for the web server.
