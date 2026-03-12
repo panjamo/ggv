@@ -1372,7 +1372,7 @@ try {
   const svg = await graphviz.dot(dot);
   s.textContent = 'Saving…';
   const res = await fetch('/save-svg', {method:'POST', headers:{'Content-Type':'image/svg+xml','Content-Length':new TextEncoder().encode(svg).length}, body: svg});
-  if (res.ok) { s.textContent = 'SVG saved.'; } else { s.textContent = 'Error: ' + await res.text(); }
+  if (res.ok) { s.textContent = 'SVG saved.'; setTimeout(() => window.close(), 500); } else { s.textContent = 'Error: ' + await res.text(); }
 } catch(e) { s.textContent = 'Error: ' + e; }
 </script></body></html>"#;
     send_response(stream, 200, "text/html; charset=utf-8", html);
