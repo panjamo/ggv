@@ -819,7 +819,7 @@ fn batch_diff_file_lists(
     repo_path: &std::path::Path,
     pairs: &[(String, String)],
 ) -> HashMap<(String, String), Vec<String>> {
-    use std::io::Write as IoWrite;
+    use std::io::{BufRead, BufReader, Write as IoWrite};
     use std::process::{Command, Stdio};
 
     let mut result: HashMap<(String, String), Vec<String>> = HashMap::new();
@@ -845,23 +845,38 @@ fn batch_diff_file_lists(
         Err(_) => return result,
     };
 
-    // Write all pairs to stdin
-    if let Some(stdin) = child.stdin.take() {
+    let stdin = match child.stdin.take() {
+        Some(s) => s,
+        None => return result,
+    };
+
+    let stdout = match child.stdout.take() {
+        Some(s) => s,
+        None => return result,
+    };
+
+    // Write all pairs to stdin in a separate thread to avoid deadlock
+    let pairs_clone = pairs.to_vec();
+    let stdin_handle = std::thread::spawn(move || {
         let mut stdin = stdin;
-        for (from, to) in pairs {
+        for (from, to) in pairs_clone {
             let _ = writeln!(stdin, "{} {}", from, to);
+        }
+        // stdin is automatically dropped here, closing the pipe
+    });
+
+    // Read stdout while the writer thread is still working
+    let reader = BufReader::new(stdout);
+    let mut lines: Vec<String> = Vec::new();
+    for line in reader.lines() {
+        if let Ok(l) = line {
+            lines.push(l);
         }
     }
 
-    let output = match child.wait_with_output() {
-        Ok(o) => o,
-        Err(_) => return result,
-    };
-
-    let text = match std::str::from_utf8(&output.stdout) {
-        Ok(s) => s,
-        Err(_) => return result,
-    };
+    // Wait for the writer thread and the git process to finish
+    let _ = stdin_handle.join();
+    let _ = child.wait();
 
     // Parse output: each pair starts with the 40-char from_sha on its own line,
     // followed by zero or more file path lines.
@@ -869,7 +884,7 @@ fn batch_diff_file_lists(
     let mut current_pair: Option<&(String, String)> = None;
     let mut current_files: Vec<String> = Vec::new();
 
-    for line in text.lines() {
+    for line in &lines {
         // A SHA1 header line (exactly 40 hex chars) signals a new pair
         if line.len() == 40 && line.chars().all(|c| c.is_ascii_hexdigit()) {
             // Flush previous pair
