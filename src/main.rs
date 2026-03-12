@@ -70,7 +70,13 @@ fn main() -> Result<()> {
         args.current_branch,
     )?;
 
-    git_viz.generate_dot(&output)?;
+    git_viz.generate_dot(&output, &args.splines)?;
+
+    // If --stats flag is set, exit after showing statistics
+    if args.stats {
+        println!("DOT file generated: {}", output);
+        return Ok(());
+    }
 
     let regen = Some(web_server::RegenerateConfig {
         repo_path: args.repo_path.clone(),
@@ -81,6 +87,7 @@ fn main() -> Result<()> {
         theme: args.theme,
         current_branch_only: args.current_branch,
         no_fetch: args.no_fetch,
+        splines: args.splines.clone(),
         web_server_url: String::new(), // filled in by start()
     });
     let (handle, port) = web_server::start(

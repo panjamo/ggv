@@ -70,6 +70,8 @@ Options:
   -l, --lang <LOCALE>       Language locale for AI output (e.g. de-DE, en-US, fr-FR) [default: de-DE]
   -N, --gia-audio           Enable microphone audio recording in gia
   -M, --max-diff-files <N>  Max changed files to render in diff view; if exceeded only commit list is shown (0 = unlimited) [default: 100]
+  -s, --splines <MODE>      Edge routing style: auto (polyline if edges >1200, else ortho), line, ortho, curved, polyline, spline [default: auto]
+  -S, --stats               Show graph statistics (node count, edge count) and exit without starting web server
   -h, --help                Print help
   -V, --version             Print version
 ```
@@ -194,6 +196,27 @@ ggv -N --lang en-US   # enable audio + set language
 ```
 
 The process stays alive after the SVG is opened, serving requests until Ctrl+C. Each `ggv` instance gets its own OS-assigned port, so multiple instances can run simultaneously.
+
+### Graph Statistics and Splines Mode
+
+Show graph statistics (node and edge count) without starting the web server:
+
+```bash
+ggv --stats
+```
+
+The `--splines` option controls edge routing style. The default `auto` mode selects the routing algorithm based on graph complexity:
+
+```bash
+ggv --splines auto       # polyline if edges >1200, else ortho (default)
+ggv --splines ortho      # orthogonal edges (good for small graphs)
+ggv --splines polyline   # polyline edges (good for large graphs)
+ggv --splines line       # straight lines (fastest, least readable)
+ggv --splines curved     # curved splines (slowest, most aesthetic)
+ggv --splines spline     # b-splines
+```
+
+Use `--stats` to determine the optimal splines mode for your repository before generating the full visualization.
 
 ## Output
 

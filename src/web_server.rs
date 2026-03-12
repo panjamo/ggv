@@ -22,6 +22,7 @@ pub struct RegenerateConfig {
     pub theme: Theme,
     pub current_branch_only: bool,
     pub no_fetch: bool,
+    pub splines: String,
     /// Filled in by `start()` once the port is known.
     pub web_server_url: String,
 }
@@ -47,7 +48,7 @@ fn regenerate(config: &RegenerateConfig) {
             return;
         }
     };
-    if let Err(e) = git_viz.generate_dot(&config.dot_path) {
+    if let Err(e) = git_viz.generate_dot(&config.dot_path, &config.splines) {
         eprintln!("Regenerate: failed to generate DOT: {e}");
         return;
     }

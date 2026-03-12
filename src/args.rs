@@ -106,4 +106,20 @@ pub struct Args {
         default_value_t = 100
     )]
     pub max_diff_files: usize,
+
+    #[arg(
+        short = 's',
+        long,
+        help = "Edge routing style: auto (polyline if edges >1200, else ortho), line, ortho, curved, polyline, spline",
+        default_value = "auto"
+    )]
+    pub splines: String,
+
+    #[arg(
+        short = 'S',
+        long,
+        help = "Show graph statistics (node count, edge count) and exit without starting web server",
+        action = clap::ArgAction::SetTrue
+    )]
+    pub stats: bool,
 }

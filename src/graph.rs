@@ -158,11 +158,7 @@ impl GitGraphviz {
         (sample, total)
     }
 
-    pub fn generate_dot(&self, output_path: &str) -> Result<()> {
-        let file = File::create(output_path)
-            .with_context(|| format!("Failed to create output file: {}", output_path))?;
-        let mut writer = BufWriter::new(file);
-
+    pub fn generate_dot(&self, output_path: &str, splines_arg: &str) -> Result<()> {
         let mut referenced_commits: HashMap<String, CommitNode> = HashMap::new();
         let mut branch_tips: HashMap<String, String> = HashMap::new();
 
@@ -302,6 +298,30 @@ impl GitGraphviz {
             commit_parents.insert(commit.id.clone(), valid);
         }
 
+        // Calculate graph statistics
+        let node_count = condensed_graph.len();
+        let edge_count: usize = commit_parents.values().map(|v| v.len()).sum();
+
+        eprintln!("Graph stats: {} nodes, {} edges", node_count, edge_count);
+
+        // Determine splines mode: auto (based on edge count) or explicit value
+        let splines_mode = if splines_arg == "auto" {
+            if edge_count > 1200 {
+                eprintln!("Auto mode: using 'polyline' splines (edge count > 1200)");
+                "polyline"
+            } else {
+                eprintln!("Auto mode: using 'ortho' splines (edge count <= 1200)");
+                "ortho"
+            }
+        } else {
+            eprintln!("Using explicit splines mode: '{}'", splines_arg);
+            splines_arg
+        };
+
+        let file = File::create(output_path)
+            .with_context(|| format!("Failed to create output file: {}", output_path))?;
+        let mut writer = BufWriter::new(file);
+
         let tc = self.theme.colors();
         writeln!(writer, "digraph git {{")?;
         writeln!(writer, "  rankdir=BT;")?;
@@ -322,8 +342,8 @@ impl GitGraphviz {
             .replace('\n', "\\n");
         writeln!(
             writer,
-            "  graph [splines=line, nodesep=0.4, ranksep=0.5, pad=\"0.5,0.5\", tooltip=\"{}\"];",
-            graph_tooltip
+            "  graph [splines={}, nodesep=0.4, ranksep=0.5, pad=\"0.5,0.5\", mclimit=5.0, tooltip=\"{}\"];",
+            splines_mode, graph_tooltip
         )?;
 
         // Write all nodes
