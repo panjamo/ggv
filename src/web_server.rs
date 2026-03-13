@@ -74,21 +74,36 @@ Format:
 
 const DEFAULT_LOG_PROMPT: &str = DEFAULT_DIFF_PROMPT;
 
-/// Returns the diff prompt: reads `~/.ggv/prompt/default_prompt.md` if it exists,
-/// otherwise writes the built-in default there and returns it.
-fn load_diff_prompt() -> String {
+const DEFAULT_AUDIO_PROMPT: &str =
+    "You are an experienced software engineer reviewing a Git diff. \
+Analyze the diff according to the instructions provided in the audio recording.";
+
+/// Loads a prompt from `~/.ggv/prompt/<filename>`, writing `default` there if absent.
+fn load_prompt_file(filename: &str, default: &str) -> String {
     if let Some(home) = dirs::home_dir() {
-        let prompt_path = home.join(".ggv").join("prompt").join("default_prompt.md");
+        let prompt_path = home.join(".ggv").join("prompt").join(filename);
         if prompt_path.exists() {
             if let Ok(content) = std::fs::read_to_string(&prompt_path) {
                 return content;
             }
         } else if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
-            let _ = std::fs::write(&prompt_path, DEFAULT_DIFF_PROMPT);
+            let _ = std::fs::write(&prompt_path, default);
         }
     }
-    DEFAULT_DIFF_PROMPT.to_string()
+    default.to_string()
+}
+
+/// Returns the diff prompt: reads `~/.ggv/prompt/default_prompt.md` if it exists,
+/// otherwise writes the built-in default there and returns it.
+fn load_diff_prompt() -> String {
+    load_prompt_file("default_prompt.md", DEFAULT_DIFF_PROMPT)
+}
+
+/// Returns the audio-extension prompt: reads `~/.ggv/prompt/audio_prompt.md` if it exists,
+/// otherwise writes the built-in default there and returns it.
+fn load_audio_prompt() -> String {
+    load_prompt_file("audio_prompt.md", DEFAULT_AUDIO_PROMPT)
 }
 
 /// Git log format used as metadata context when feeding diffs to the AI.
@@ -114,15 +129,6 @@ fn with_lang(prompt: &str, lang: &str) -> String {
     format!("{}\nRespond in the language of locale: {}.", prompt, lang)
 }
 
-/// Appends a voice-input instruction to a prompt string when audio mode is active.
-fn with_audio(prompt: &str) -> String {
-    format!(
-        "{}\nThe audio/ogg.attachment is an extension for the prompt \
-It may contain filter instructions or directions — \
-for example, specifying what should or should not be considered in the analysis.",
-        prompt
-    )
-}
 
 /// Binds to the given port (0 = OS-assigned) and spawns the server thread.
 /// Returns the join handle and the actual bound port.
@@ -474,13 +480,9 @@ fn handle_connection(
                 );
                 return;
             }
-            let base_prompt = prompt.as_deref().unwrap_or(DEFAULT_LOG_PROMPT).to_string();
+            let loaded_prompt = if gia_audio { load_audio_prompt() } else { load_diff_prompt() };
+            let base_prompt = prompt.as_deref().unwrap_or(&loaded_prompt).to_string();
             let effective_prompt = with_lang(&base_prompt, lang);
-            let effective_prompt = if gia_audio {
-                with_audio(&effective_prompt)
-            } else {
-                effective_prompt
-            };
             let summary = run_gia_log(repo_path, &sha1, &sha2, Some(&effective_prompt), gia_audio);
             if summary.is_empty() {
                 send_response(
@@ -568,14 +570,9 @@ fn handle_connection(
             }
             if force_ai {
                 let include_log = !params.get("nolog").map(|v| v == "1").unwrap_or(false);
-                let loaded_prompt = load_diff_prompt();
+                let loaded_prompt = if gia_audio { load_audio_prompt() } else { load_diff_prompt() };
                 let base_prompt = prompt.as_deref().unwrap_or(&loaded_prompt).to_string();
                 let effective_prompt = with_lang(&base_prompt, lang);
-                let effective_prompt = if gia_audio {
-                    with_audio(&effective_prompt)
-                } else {
-                    effective_prompt
-                };
                 let summary = run_gia_diff(
                     repo_path,
                     &sha1,
@@ -2674,7 +2671,7 @@ fn run_gia_diff(
     let label2 = get_ref_label(repo_path, sha2);
     let header_path = write_header_file(&label1, &label2);
 
-    let loaded_prompt = load_diff_prompt();
+    let loaded_prompt = if gia_audio { load_audio_prompt() } else { load_diff_prompt() };
     let effective_prompt = prompt.unwrap_or(&loaded_prompt);
     let mut gia_args: Vec<String> = vec!["--markdown".to_string(), effective_prompt.to_string()];
     if gia_audio {
