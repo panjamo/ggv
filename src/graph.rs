@@ -19,6 +19,7 @@ pub struct GitGraphviz {
     ancestor_oid: Option<Oid>,
     theme: Theme,
     current_branch_only: bool,
+    limit: usize,
 }
 
 impl GitGraphviz {
@@ -29,6 +30,7 @@ impl GitGraphviz {
         from_commit: Option<String>,
         theme: Theme,
         current_branch_only: bool,
+        limit: usize,
     ) -> Result<Self> {
         let repo = Repository::open(repo_path)
             .with_context(|| format!("Failed to open repository at: {}", repo_path))?;
@@ -54,6 +56,7 @@ impl GitGraphviz {
             ancestor_oid,
             theme,
             current_branch_only,
+            limit,
         })
     }
 
@@ -278,6 +281,23 @@ impl GitGraphviz {
             if let Some(commit) = referenced_commits.get_mut(&checkout_id) {
                 commit.set_current_checkout(true);
             }
+        }
+
+        // Apply commit limit filter if specified
+        if self.limit > 0 {
+            let mut commits_by_time: Vec<(&String, &CommitNode)> =
+                referenced_commits.iter().collect();
+            commits_by_time.sort_by(|a, b| b.1.timestamp().cmp(&a.1.timestamp()));
+
+            let keep_ids: HashSet<String> = commits_by_time
+                .into_iter()
+                .take(self.limit)
+                .map(|(id, _)| id.clone())
+                .collect();
+
+            referenced_commits.retain(|id, _| keep_ids.contains(id));
+
+            eprintln!("Applied limit: showing {} most recent commits", self.limit);
         }
 
         let condensed_graph = self.build_condensed_graph(&referenced_commits)?;

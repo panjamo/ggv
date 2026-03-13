@@ -65,6 +65,7 @@ Options:
   -X, --no-fetch            Skip automatic 'git fetch --tags --prune'
   -t, --theme <THEME>       Color theme: dark or light [default: dark]
   -c, --current-branch      Show only refs that are ancestors of HEAD
+  -L, --limit <N>           Limit graph to the N most recent commits by timestamp (0 = no limit) [default: 0]
   -P, --web-port <PORT>     Port for the diff server (0 = OS-assigned) [default: 0]
   -p, --gia-prompt <TEXT>   Custom prompt passed to gia (overrides built-in default)
   -l, --lang <LOCALE>       Language locale for AI output (e.g. de-DE, en-US, fr-FR) [default: de-DE]
@@ -145,6 +146,21 @@ Combine subtree with current-branch view:
 
 ```bash
 ggv -F v1.0.0 -c
+```
+
+Show only the 50 most recent commits:
+
+```bash
+ggv --limit 50
+ggv -L 100
+```
+
+Combine limit with other filters:
+
+```bash
+ggv -L 30 -c           # 30 newest commits on current branch
+ggv -L 100 -f bt       # 100 newest commits, branches and tags only
+ggv -L 50 -F v1.0.0    # 50 newest commits from v1.0.0 onwards
 ```
 
 ### Diff Web Server

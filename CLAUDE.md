@@ -35,6 +35,7 @@ Always run the complete quality check sequence:
 - `web_server: bool` — defaults to `true`; set to `false` via `-s` / `--svg-only` to skip the web server and generate a standalone SVG
 - `max_diff_files: usize` — diff file limit for the web UI (default 100); if exceeded the diff view is suppressed and only commit cards are shown; `0` disables the limit
 - `gia_audio: bool` — defaults to `false`; set to `true` via `-N` / `--gia-audio` to enable microphone recording in gia
+- `limit: usize` — restricts the graph to the N most recent commits by timestamp (default 0 = no limit); set via `-L` / `--limit`
 
 **RefFilter (`main.rs`)**
 - Parses the `--filter` string (`b`=branches, `r`=remotes, `t`=tags, `h`=HEAD)
@@ -45,9 +46,10 @@ Always run the complete quality check sequence:
 - Handles DOT node formatting: shape, color, label, URL, and tooltip attributes
 - Color coding: yellow=current checkout, light blue=local branch, light green=remote, pink=tag, orange=other refs
 
-**GitGraphviz (`main.rs`)**
-- Main orchestration struct holding the Repository, RefFilter, and optional GitLab base URL
-- `generate_dot()` — collects referenced commits, builds condensed graph, writes DOT file
+**GitGraphviz (`graph.rs`)**
+- Main orchestration struct holding the Repository, RefFilter, optional GitLab base URL, and commit limit
+- `generate_dot()` — collects referenced commits, applies limit filter (if set), builds condensed graph, writes DOT file
+- Limit filter: after collecting all referenced commits, sorts by timestamp (newest first) and retains only the top N commits
 - `build_condensed_graph()` / `find_connection_path()` — adds merge-junction commits needed to maintain graph connectivity
 - `find_condensed_connections()` — traces the nearest condensed ancestor for each commit edge
 - `collect_path_commits()` — gathers commits between two nodes for hover tooltips
@@ -77,11 +79,12 @@ Always run the complete quality check sequence:
 1. Parse CLI arguments and open Git repository using git2
 2. Collect referenced commits for each enabled ref type (branches, remotes, tags, HEAD)
 3. Add root commits and tag associations; mark branch tips and current checkout
-4. Build condensed graph: keep only referenced commits plus necessary merge-junction commits
-5. Pre-compute condensed parent edges and forge (GitLab/GitHub) compare URLs
-6. Write DOT file with styled nodes and edges
-7. Start web server that renders DOT → SVG in-browser via @hpcc-js/wasm-graphviz (WASM)
-8. Unless `--no-show`: open browser to view the rendered SVG
+4. Apply commit limit filter if `--limit N` is set: sort all commits by timestamp (newest first) and keep only top N
+5. Build condensed graph: keep only referenced commits plus necessary merge-junction commits
+6. Pre-compute condensed parent edges and forge (GitLab/GitHub) compare URLs
+7. Write DOT file with styled nodes and edges
+8. Start web server that renders DOT → SVG in-browser via @hpcc-js/wasm-graphviz (WASM)
+9. Unless `--no-show`: open browser to view the rendered SVG
 
 ### Dependencies
 - `git2` — Git repository access and commit traversal

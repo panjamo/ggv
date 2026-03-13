@@ -68,6 +68,7 @@ fn main() -> Result<()> {
         args.from,
         args.theme,
         args.current_branch,
+        args.limit,
     )?;
 
     git_viz.generate_dot(&output, &args.splines)?;
@@ -89,6 +90,7 @@ fn main() -> Result<()> {
         no_fetch: args.no_fetch,
         splines: args.splines.clone(),
         web_server_url: String::new(), // filled in by start()
+        limit: args.limit,
     });
     let (handle, port) = web_server::start(
         args.web_port,

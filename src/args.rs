@@ -122,4 +122,12 @@ pub struct Args {
         action = clap::ArgAction::SetTrue
     )]
     pub stats: bool,
+
+    #[arg(
+        short = 'L',
+        long,
+        help = "Limit graph to the N most recent commits by timestamp (0 = no limit)",
+        default_value_t = 0
+    )]
+    pub limit: usize,
 }
