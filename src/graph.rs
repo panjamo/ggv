@@ -410,9 +410,9 @@ impl GitGraphviz {
             let (path_commits, count) =
                 self.collect_path_commits_with_count(child_id, Some(pid.as_str()), 20);
             let tooltip = build_tooltip(&path_commits);
-            let (files, file_count) = batch_files
+            let (files, lines) = batch_files
                 .get(&(pid.clone(), child_id.clone()))
-                .map(|v| {
+                .map(|(v, total_lines)| {
                     let total = v.len();
                     const MAX: usize = 30;
                     let list = if total == 0 {
@@ -424,10 +424,9 @@ impl GitGraphviz {
                     } else {
                         Some(v.join("|"))
                     };
-                    (list, total)
+                    (list, *total_lines)
                 })
                 .unwrap_or((None, 0));
-            let lines = file_count; // use file count as fast proxy for edge thickness
             edge_attrs.insert(
                 (pid.clone(), child_id.clone()),
                 (url, tooltip, count, files, lines),
@@ -833,16 +832,16 @@ fn build_tooltip(path_commits: &[(String, String, String, String)]) -> Option<St
     )
 }
 
-/// Run one `git diff-tree --name-only -r --stdin` subprocess for all pairs at once.
-/// Returns a map from (from_sha, to_sha) → Vec<file_path>.
+/// Run one `git diff-tree --numstat -r --stdin` subprocess for all pairs at once.
+/// Returns a map from (from_sha, to_sha) → (Vec<file_path>, total_changed_lines).
 fn batch_diff_file_lists(
     repo_path: &std::path::Path,
     pairs: &[(String, String)],
-) -> HashMap<(String, String), Vec<String>> {
+) -> HashMap<(String, String), (Vec<String>, usize)> {
     use std::io::{BufRead, BufReader, Write as IoWrite};
     use std::process::{Command, Stdio};
 
-    let mut result: HashMap<(String, String), Vec<String>> = HashMap::new();
+    let mut result: HashMap<(String, String), (Vec<String>, usize)> = HashMap::new();
     if pairs.is_empty() {
         return result;
     }
@@ -852,7 +851,7 @@ fn batch_diff_file_lists(
             "-C",
             &repo_path.to_string_lossy(),
             "diff-tree",
-            "--name-only",
+            "--numstat",
             "-r",
             "--stdin",
         ])
@@ -899,10 +898,11 @@ fn batch_diff_file_lists(
     let _ = child.wait();
 
     // Parse output: each pair starts with the 40-char from_sha on its own line,
-    // followed by zero or more file path lines.
+    // followed by zero or more numstat lines: "<additions>\t<deletions>\t<filename>"
     let mut pair_iter = pairs.iter();
     let mut current_pair: Option<&(String, String)> = None;
     let mut current_files: Vec<String> = Vec::new();
+    let mut current_lines: usize = 0;
 
     for line in &lines {
         // A SHA1 header line (exactly 40 hex chars) signals a new pair
@@ -911,17 +911,26 @@ fn batch_diff_file_lists(
             if let Some(pair) = current_pair.take() {
                 result.insert(
                     (pair.0.clone(), pair.1.clone()),
-                    std::mem::take(&mut current_files),
+                    (std::mem::take(&mut current_files), current_lines),
                 );
+                current_lines = 0;
             }
             current_pair = pair_iter.next();
         } else if !line.is_empty() {
-            current_files.push(line.to_string());
+            // numstat format: "<add>\t<del>\t<filename>"  (binary files use "-")
+            let mut parts = line.splitn(3, '\t');
+            let add: usize = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let del: usize = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let filename = parts.next().unwrap_or("").to_string();
+            current_lines += add + del;
+            if !filename.is_empty() {
+                current_files.push(filename);
+            }
         }
     }
     // Flush last pair
     if let Some(pair) = current_pair {
-        result.insert((pair.0.clone(), pair.1.clone()), current_files);
+        result.insert((pair.0.clone(), pair.1.clone()), (current_files, current_lines));
     }
 
     result
