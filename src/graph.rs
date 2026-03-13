@@ -3,7 +3,6 @@ use git2::{BranchType, Oid, Repository};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::path::PathBuf;
 
 use crate::commit_node::CommitNode;
 use crate::filter::RefFilter;
@@ -15,7 +14,6 @@ type EdgeAttrs =
 
 pub struct GitGraphviz {
     repo: Repository,
-    repo_path: PathBuf,
     filter: RefFilter,
     gitlab_base_url: Option<String>,
     ancestor_oid: Option<Oid>,
@@ -35,8 +33,6 @@ impl GitGraphviz {
         let repo = Repository::open(repo_path)
             .with_context(|| format!("Failed to open repository at: {}", repo_path))?;
 
-        let repo_path = repo.workdir().unwrap_or_else(|| repo.path()).to_path_buf();
-
         let gitlab_base_url = gitlab_url.or_else(|| Self::detect_gitlab_url(&repo));
 
         let ancestor_oid = if let Some(ref spec) = from_commit {
@@ -53,7 +49,6 @@ impl GitGraphviz {
 
         Ok(Self {
             repo,
-            repo_path,
             filter,
             gitlab_base_url,
             ancestor_oid,
@@ -366,8 +361,8 @@ impl GitGraphviz {
             }
         }
 
-        // Batch-compute file lists for all edges via one git diff-tree subprocess
-        let batch_files = batch_diff_file_lists(&self.repo_path, &pairs_ordered);
+        // Compute file lists and changed-line counts for all edges via git2
+        let batch_files = batch_diff_file_lists(&self.repo, &pairs_ordered);
 
         // Build edge attributes: (parent_id, child_id) -> (url, tooltip, count)
         let mut edge_attrs: EdgeAttrs = HashMap::new();
@@ -832,108 +827,51 @@ fn build_tooltip(path_commits: &[(String, String, String, String)]) -> Option<St
     )
 }
 
-/// Run one `git diff-tree --numstat -r --stdin` subprocess for all pairs at once.
+/// Compute file list and changed-line count between two commits using git2.
 /// Returns a map from (from_sha, to_sha) → (Vec<file_path>, total_changed_lines).
 fn batch_diff_file_lists(
-    repo_path: &std::path::Path,
+    repo: &Repository,
     pairs: &[(String, String)],
 ) -> HashMap<(String, String), (Vec<String>, usize)> {
-    use std::io::{BufRead, BufReader, Write as IoWrite};
-    use std::process::{Command, Stdio};
+    pairs
+        .iter()
+        .map(|(from_sha, to_sha)| {
+            let stats = diff_tree_stats(repo, from_sha, to_sha).unwrap_or((Vec::new(), 0));
+            ((from_sha.clone(), to_sha.clone()), stats)
+        })
+        .collect()
+}
 
-    let mut result: HashMap<(String, String), (Vec<String>, usize)> = HashMap::new();
-    if pairs.is_empty() {
-        return result;
-    }
-
-    let mut child = match Command::new("git")
-        .args([
-            "-C",
-            &repo_path.to_string_lossy(),
-            "diff-tree",
-            "--numstat",
-            "-r",
-            "--stdin",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(c) => c,
-        Err(_) => return result,
-    };
-
-    let stdin = match child.stdin.take() {
-        Some(s) => s,
-        None => return result,
-    };
-
-    let stdout = match child.stdout.take() {
-        Some(s) => s,
-        None => return result,
-    };
-
-    // Write all pairs to stdin in a separate thread to avoid deadlock
-    let pairs_clone = pairs.to_vec();
-    let stdin_handle = std::thread::spawn(move || {
-        let mut stdin = stdin;
-        for (from, to) in pairs_clone {
-            let _ = writeln!(stdin, "{} {}", from, to);
-        }
-        // stdin is automatically dropped here, closing the pipe
-    });
-
-    // Read stdout while the writer thread is still working
-    let reader = BufReader::new(stdout);
-    let mut lines: Vec<String> = Vec::new();
-    for line in reader.lines() {
-        if let Ok(l) = line {
-            lines.push(l);
-        }
-    }
-
-    // Wait for the writer thread and the git process to finish
-    let _ = stdin_handle.join();
-    let _ = child.wait();
-
-    // Parse output: each pair starts with the 40-char from_sha on its own line,
-    // followed by zero or more numstat lines: "<additions>\t<deletions>\t<filename>"
-    let mut pair_iter = pairs.iter();
-    let mut current_pair: Option<&(String, String)> = None;
-    let mut current_files: Vec<String> = Vec::new();
-    let mut current_lines: usize = 0;
-
-    for line in &lines {
-        // A SHA1 header line (exactly 40 hex chars) signals a new pair
-        if line.len() == 40 && line.chars().all(|c| c.is_ascii_hexdigit()) {
-            // Flush previous pair
-            if let Some(pair) = current_pair.take() {
-                result.insert(
-                    (pair.0.clone(), pair.1.clone()),
-                    (std::mem::take(&mut current_files), current_lines),
-                );
-                current_lines = 0;
-            }
-            current_pair = pair_iter.next();
-        } else if !line.is_empty() {
-            // numstat format: "<add>\t<del>\t<filename>"  (binary files use "-")
-            let mut parts = line.splitn(3, '\t');
-            let add: usize = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-            let del: usize = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-            let filename = parts.next().unwrap_or("").to_string();
-            current_lines += add + del;
-            if !filename.is_empty() {
-                current_files.push(filename);
-            }
-        }
-    }
-    // Flush last pair
-    if let Some(pair) = current_pair {
-        result.insert((pair.0.clone(), pair.1.clone()), (current_files, current_lines));
-    }
-
-    result
+fn diff_tree_stats(
+    repo: &Repository,
+    from_sha: &str,
+    to_sha: &str,
+) -> Option<(Vec<String>, usize)> {
+    let from_tree = repo
+        .find_commit(Oid::from_str(from_sha).ok()?)
+        .ok()?
+        .tree()
+        .ok()?;
+    let to_tree = repo
+        .find_commit(Oid::from_str(to_sha).ok()?)
+        .ok()?
+        .tree()
+        .ok()?;
+    let diff = repo
+        .diff_tree_to_tree(Some(&from_tree), Some(&to_tree), None)
+        .ok()?;
+    let stats = diff.stats().ok()?;
+    let total_lines = stats.insertions() + stats.deletions();
+    let files: Vec<String> = diff
+        .deltas()
+        .filter_map(|d| {
+            d.new_file()
+                .path()
+                .or_else(|| d.old_file().path())
+                .map(|p| p.to_string_lossy().into_owned())
+        })
+        .collect();
+    Some((files, total_lines))
 }
 
 fn edge_penwidth(line_count: usize) -> f32 {
@@ -962,7 +900,15 @@ fn build_edge_attrs(
         format!("tooltip=\"{}\"", escaped)
     });
     let label_part = if count > 0 {
-        format!("xlabel=\"{}\", fontsize=8, fontcolor=\"#94A3B8\"", count)
+        let fs = if lines == 0 {
+            8.0f32
+        } else {
+            (7.0 + (lines as f64 + 1.0).log10() as f32 * 1.5).clamp(7.0, 14.0)
+        };
+        format!(
+            "xlabel=\"{}\", fontsize={:.0}, fontcolor=\"#94A3B8\"",
+            count, fs
+        )
     } else {
         String::new()
     };

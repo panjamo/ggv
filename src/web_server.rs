@@ -129,7 +129,6 @@ fn with_lang(prompt: &str, lang: &str) -> String {
     format!("{}\nRespond in the language of locale: {}.", prompt, lang)
 }
 
-
 /// Binds to the given port (0 = OS-assigned) and spawns the server thread.
 /// Returns the join handle and the actual bound port.
 /// Seconds without a heartbeat before GGV shuts itself down.
@@ -480,7 +479,11 @@ fn handle_connection(
                 );
                 return;
             }
-            let loaded_prompt = if gia_audio { load_audio_prompt() } else { load_diff_prompt() };
+            let loaded_prompt = if gia_audio {
+                load_audio_prompt()
+            } else {
+                load_diff_prompt()
+            };
             let base_prompt = prompt.as_deref().unwrap_or(&loaded_prompt).to_string();
             let effective_prompt = with_lang(&base_prompt, lang);
             let summary = run_gia_log(repo_path, &sha1, &sha2, Some(&effective_prompt), gia_audio);
@@ -570,7 +573,11 @@ fn handle_connection(
             }
             if force_ai {
                 let include_log = !params.get("nolog").map(|v| v == "1").unwrap_or(false);
-                let loaded_prompt = if gia_audio { load_audio_prompt() } else { load_diff_prompt() };
+                let loaded_prompt = if gia_audio {
+                    load_audio_prompt()
+                } else {
+                    load_diff_prompt()
+                };
                 let base_prompt = prompt.as_deref().unwrap_or(&loaded_prompt).to_string();
                 let effective_prompt = with_lang(&base_prompt, lang);
                 let summary = run_gia_diff(
@@ -2671,7 +2678,11 @@ fn run_gia_diff(
     let label2 = get_ref_label(repo_path, sha2);
     let header_path = write_header_file(&label1, &label2);
 
-    let loaded_prompt = if gia_audio { load_audio_prompt() } else { load_diff_prompt() };
+    let loaded_prompt = if gia_audio {
+        load_audio_prompt()
+    } else {
+        load_diff_prompt()
+    };
     let effective_prompt = prompt.unwrap_or(&loaded_prompt);
     let mut gia_args: Vec<String> = vec!["--markdown".to_string(), effective_prompt.to_string()];
     if gia_audio {
