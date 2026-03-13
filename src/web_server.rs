@@ -472,6 +472,7 @@ fn handle_connection(
             };
             let filter_str = params.get("filter").cloned().unwrap_or_default();
             let pathspecs = parse_pathspec(&filter_str);
+            let use_audio = gia_audio || params.get("audio").map(|v| v == "1").unwrap_or(false);
             if !has_git_diff(repo_path, &sha1, &sha2, &[]) {
                 send_response(
                     &mut stream,
@@ -481,14 +482,14 @@ fn handle_connection(
                 );
                 return;
             }
-            let loaded_prompt = if gia_audio {
+            let loaded_prompt = if use_audio {
                 load_audio_prompt()
             } else {
                 load_diff_prompt()
             };
             let base_prompt = prompt.as_deref().unwrap_or(&loaded_prompt).to_string();
             let effective_prompt = with_lang(&base_prompt, lang);
-            let summary = run_gia_log(repo_path, &sha1, &sha2, Some(&effective_prompt), gia_audio);
+            let summary = run_gia_log(repo_path, &sha1, &sha2, Some(&effective_prompt), use_audio);
             if summary.is_empty() {
                 send_response(
                     &mut stream,
@@ -575,7 +576,8 @@ fn handle_connection(
             }
             if force_ai {
                 let include_log = !params.get("nolog").map(|v| v == "1").unwrap_or(false);
-                let loaded_prompt = if gia_audio {
+                let use_audio = gia_audio || params.get("audio").map(|v| v == "1").unwrap_or(false);
+                let loaded_prompt = if use_audio {
                     load_audio_prompt()
                 } else {
                     load_diff_prompt()
@@ -588,7 +590,7 @@ fn handle_connection(
                     &sha2,
                     Some(&effective_prompt),
                     include_log,
-                    gia_audio,
+                    use_audio,
                     &pathspecs,
                 );
                 if summary.is_empty() {
@@ -620,6 +622,7 @@ fn handle_connection(
                 send_response(&mut stream, 200, "text/html; charset=utf-8", &html);
             } else {
                 let gitlab_url = regen.as_ref().and_then(|r| r.gitlab_url.as_deref());
+                let use_audio = gia_audio || params.get("audio").map(|v| v == "1").unwrap_or(false);
                 match run_diff2html(
                     repo_path,
                     &sha1,
@@ -629,6 +632,7 @@ fn handle_connection(
                     &filter_str,
                     max_diff_files,
                     gitlab_url,
+                    use_audio,
                 ) {
                     Ok(html) => send_response(&mut stream, 200, "text/html; charset=utf-8", &html),
                     Err(e) => send_response(&mut stream, 500, "text/plain", &e),
@@ -696,6 +700,7 @@ fn handle_connection(
                 &filter_str,
                 max_diff_files,
                 gitlab_url,
+                gia_audio,
             ) {
                 Ok(html) => {
                     let html = inject_commit_navigation(&html, older.as_deref(), newer.as_deref());
@@ -2139,6 +2144,7 @@ fn run_diff2html(
     filter_str: &str,
     max_diff_files: usize,
     gitlab_url: Option<&str>,
+    gia_audio: bool,
 ) -> Result<String, String> {
     // Determine chronological order so we always diff older → newer
     let sha1_is_ancestor = std::process::Command::new("git")
@@ -2266,6 +2272,10 @@ fn run_diff2html(
 
     // Build links for the filter bar: git difftool and optional GitLab compare.
     let difftool_url = format!("/diff?from={sha1}&to={sha2}");
+    let ai_summary_url = format!("/diff2html?from={sha1}&to={sha2}&ai=1");
+    let ai_diff_url = format!("/diff2html?from={sha1}&to={sha2}&ai=1&nolog=1");
+    let ai_commits_url = format!("/log-summary?from={sha1}&to={sha2}");
+    let ai_audio_checked = if gia_audio { "checked" } else { "" };
     let gitlab_link = gitlab_url.map(|base| {
         let compare_segment = if base.contains("github.com") {
             "/compare/"
@@ -2288,7 +2298,19 @@ fn run_diff2html(
   <button class="ggv-flt-btn" onclick="ggvClearFilter()">Clear</button>
   <button class="ggv-flt-link" onclick="fetch('{difftool_url}')">Git Difftool</button>
   {gitlab_link}
-</div>"#
+  <button class="ggv-flt-link" onclick="ggvOpenAI('{ai_summary_url}')">AI Summary</button>
+  <button class="ggv-flt-link" onclick="ggvOpenAI('{ai_diff_url}')">AI Diff Only</button>
+  <button class="ggv-flt-link" onclick="ggvOpenAI('{ai_commits_url}')">AI Commits</button>
+  <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;white-space:nowrap;color:{text};margin-left:4px;">
+    <input type="checkbox" id="ggv-audio" {ai_audio_checked}>Audio Input
+  </label>
+</div>
+<script>
+function ggvOpenAI(baseUrl) {{
+  var audio = document.getElementById('ggv-audio').checked;
+  window.open(audio ? baseUrl + '&audio=1' : baseUrl, '_blank');
+}}
+</script>"#
         );
         let section = format!(
             r#"<div class="ggv-diff">
