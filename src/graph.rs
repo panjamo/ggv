@@ -9,8 +9,17 @@ use crate::filter::RefFilter;
 use crate::theme::Theme;
 use crate::utils::{repo_name_from_path, time_ago};
 
-type EdgeAttrs =
-    HashMap<(String, String), (Option<String>, Option<String>, usize, Option<String>, usize)>;
+type EdgeAttrs = HashMap<
+    (String, String),
+    (
+        Option<String>,
+        Option<String>,
+        usize,
+        Option<String>,
+        usize,
+        usize,
+    ),
+>;
 
 pub struct GitGraphviz {
     repo: Repository,
@@ -425,7 +434,7 @@ impl GitGraphviz {
             let (path_commits, count) =
                 self.collect_path_commits_with_count(child_id, Some(pid.as_str()), 20);
             let tooltip = build_tooltip(&path_commits);
-            let (files, lines) = batch_files
+            let (files, lines, file_count) = batch_files
                 .get(&(pid.clone(), child_id.clone()))
                 .map(|(v, total_lines)| {
                     let total = v.len();
@@ -439,22 +448,24 @@ impl GitGraphviz {
                     } else {
                         Some(v.join("|"))
                     };
-                    (list, *total_lines)
+                    (list, *total_lines, v.len())
                 })
-                .unwrap_or((None, 0));
+                .unwrap_or((None, 0, 0));
             edge_attrs.insert(
                 (pid.clone(), child_id.clone()),
-                (url, tooltip, count, files, lines),
+                (url, tooltip, count, files, lines, file_count),
             );
         }
 
         for (child_id, parents) in &commit_parents {
             for parent_id in parents {
-                let (url, tooltip, count, files, lines) = edge_attrs
+                let (url, tooltip, count, files, lines, file_count) = edge_attrs
                     .get(&(parent_id.clone(), child_id.clone()))
-                    .map(|(u, t, c, f, l)| (u.as_deref(), t.as_deref(), *c, f.as_deref(), *l))
-                    .unwrap_or((None, None, 0, None, 0));
-                let attrs = build_edge_attrs(url, tooltip, count, files, lines);
+                    .map(|(u, t, c, f, l, fc)| {
+                        (u.as_deref(), t.as_deref(), *c, f.as_deref(), *l, *fc)
+                    })
+                    .unwrap_or((None, None, 0, None, 0, 0));
+                let attrs = build_edge_attrs(url, tooltip, count, files, lines, file_count);
                 writeln!(writer, "  \"{}\" -> \"{}\"{}", parent_id, child_id, attrs)?;
             }
         }
@@ -908,6 +919,7 @@ fn build_edge_attrs(
     count: usize,
     files: Option<&str>,
     lines: usize,
+    file_count: usize,
 ) -> String {
     let url_part = url.map_or(String::new(), |u| {
         format!("URL=\"{}\", target=\"_blank\"", u)
@@ -920,10 +932,10 @@ fn build_edge_attrs(
         format!("tooltip=\"{}\"", escaped)
     });
     let label_part = if count > 0 {
-        let fs = if lines == 0 {
+        let fs = if file_count == 0 {
             8.0f32
         } else {
-            (7.0 + (lines as f64 + 1.0).log10() as f32 * 1.5).clamp(7.0, 14.0)
+            (7.0 + (file_count as f64 + 1.0).log10() as f32 * 4.0).clamp(7.0, 18.0)
         };
         format!(
             "xlabel=\"{}\", fontsize={:.0}, fontcolor=\"#94A3B8\"",
