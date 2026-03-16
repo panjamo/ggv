@@ -365,6 +365,57 @@ cargo check
 
 See `CLAUDE.md` for detailed architecture documentation.
 
+### Data Flow
+
+```mermaid
+flowchart TD
+    A[CLI Args] --> B[Open Git Repository\ngit2]
+    B --> C[Collect Referenced Commits\nbranches · remotes · tags · HEAD]
+    C --> D[Apply Filters]
+    D -->|--filter| D1[Ref type filter]
+    D -->|--limit N| D2[Keep N most recent]
+    D -->|--from| D3[Subtree from commit]
+    D -->|-c| D4[Current branch only]
+    D1 & D2 & D3 & D4 --> E[Build Condensed Graph\nmerge junctions + root]
+    E --> F[Compute Edge Stats\nfile count · changed lines]
+    F --> G[Write DOT File]
+    G --> H[Web Server]
+    H --> I[Browser — WASM Graphviz → SVG]
+    I --> J[Interactive SVG\nclick · drag · context menu · AI diff]
+```
+
+### Component Overview
+
+```mermaid
+graph TD
+    A[main.rs\nEntry point] --> B[args.rs\nCLI parsing]
+    A --> C[graph.rs\nGitGraphviz]
+    C --> D[commit_node.rs\nCommitNode]
+    C --> E[filter.rs\nRefFilter]
+    C --> F[theme.rs\nTheme]
+    A --> G[web_server.rs\nHTTP + diff server]
+    G --> H[graphviz.rs\nSVG enhancement]
+    G --> I[utils.rs\nHelpers]
+```
+
+### AI Diff Request Flow
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant W as Web Server
+    participant G as git
+    participant A as gia (AI)
+
+    B->>W: right-click edge → AI diff
+    W->>G: git diff sha1..sha2
+    W->>G: git log sha1..sha2
+    W->>A: prompt + diff + log
+    A-->>W: Markdown summary
+    W->>W: Markdown → HTML + diff2html section
+    W-->>B: styled HTML page (new tab)
+```
+
 ## License
 
 [Specify your license here]
