@@ -251,6 +251,21 @@ impl GitGraphviz {
             }
         }
 
+        if self.filter.should_include_stashes() {
+            if let Ok(reflog) = self.repo.reflog("refs/stash") {
+                for (index, entry) in reflog.iter().enumerate() {
+                    let oid = entry.id_new();
+                    let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
+                    let ref_name = format!("stash@{{{}}}", index);
+                    if let Some(commit_node) = referenced_commits.get_mut(&commit_id) {
+                        commit_node.add_ref(ref_name.clone());
+                        commit_node.is_stash = true;
+                    }
+                    branch_tips.insert(ref_name, commit_id);
+                }
+            }
+        }
+
         if self.filter.should_include_tags() {
             self.add_tagged_commits(&mut referenced_commits, head_oid)?;
         }
@@ -683,7 +698,15 @@ impl GitGraphviz {
                     }
                 }
 
-                for parent_id in commit.parent_ids() {
+                let is_stash = referenced_commits
+                    .get(&current_id)
+                    .map(|n| n.is_stash)
+                    .unwrap_or(false);
+                for (i, parent_id) in commit.parent_ids().enumerate() {
+                    // Skip internal git-stash parents (index, untracked) — only follow parent 0
+                    if is_stash && i > 0 {
+                        continue;
+                    }
                     let parent_id_str = parent_id.to_string();
                     if !referenced_commits.contains_key(&parent_id_str) {
                         to_visit.push((parent_id, depth + 1));
@@ -743,7 +766,15 @@ impl GitGraphviz {
 
         if let Ok(commit_oid) = commit_id.parse::<Oid>() {
             if let Ok(commit) = self.repo.find_commit(commit_oid) {
-                for parent_id in commit.parent_ids() {
+                let is_stash = condensed_graph
+                    .get(commit_id)
+                    .map(|n| n.is_stash)
+                    .unwrap_or(false);
+                for (i, parent_id) in commit.parent_ids().enumerate() {
+                    // Skip internal git-stash parents (index, untracked) — only follow parent 0
+                    if is_stash && i > 0 {
+                        continue;
+                    }
                     let mut visited = HashSet::new();
                     let connection = self.find_next_condensed_commit(
                         &parent_id.to_string(),

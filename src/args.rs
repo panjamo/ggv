@@ -23,8 +23,8 @@ pub struct Args {
     #[arg(
         short,
         long,
-        help = "Filter git refs by type (b=branches, r=remotes, t=tags, h=head)",
-        default_value = "brt"
+        help = "Filter git refs by type (b=branches, r=remotes, t=tags, h=head, s=stashes)",
+        default_value = "brts"
     )]
     pub filter: String,
 

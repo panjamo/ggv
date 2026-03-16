@@ -38,7 +38,7 @@ Always run the complete quality check sequence:
 - `limit: usize` — restricts the graph to the N most recent commits by timestamp (default 0 = no limit); set via `-L` / `--limit`
 
 **RefFilter (`main.rs`)**
-- Parses the `--filter` string (`b`=branches, `r`=remotes, `t`=tags, `h`=HEAD)
+- Parses the `--filter` string (`b`=branches, `r`=remotes, `t`=tags, `h`=HEAD, `s`=stashes); default is `"brts"`
 - Controls which Git refs are included in the graph
 
 **CommitNode (`main.rs`)**

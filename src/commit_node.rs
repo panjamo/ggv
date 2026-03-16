@@ -13,6 +13,7 @@ pub struct CommitNode {
     is_tip: bool,
     branch_readme: Option<String>,
     is_current_checkout: bool,
+    pub is_stash: bool,
 }
 
 struct NodeColors {
@@ -40,6 +41,7 @@ impl CommitNode {
             is_tip: false,
             branch_readme: None,
             is_current_checkout: false,
+            is_stash: false,
         }
     }
 
@@ -146,12 +148,6 @@ impl CommitNode {
         // Plain commit (junction node or unlabeled)
         if self.refs.is_empty() && self.tags.is_empty() {
             label_parts.push(self._short_id.clone());
-            if let Some(summary) = self._message.lines().next() {
-                let summary = summary.trim();
-                if !summary.is_empty() {
-                    label_parts.extend(format_commit_summary(&strip_merge_remote(summary)));
-                }
-            }
             let colors = if self.is_current_checkout {
                 NodeColors {
                     fill: tc.plain_current_fill,
@@ -208,9 +204,13 @@ impl CommitNode {
             for (remote, branch) in &remote_branches {
                 ref_parts.push(format!("{}/{}", remote, branch));
             }
-            ref_parts.extend(other_refs);
-
-            label_parts.extend(ref_parts);
+            if self.is_stash && !has_local_branch && !has_remote_branch {
+                // Stash node: only the stash reference label; message goes to tooltip only
+                label_parts.extend(other_refs);
+            } else {
+                ref_parts.extend(other_refs);
+                label_parts.extend(ref_parts);
+            }
         }
 
         if !self.tags.is_empty() {
@@ -292,7 +292,17 @@ impl CommitNode {
                 .replace('\n', "\\n");
             format!(", tooltip=\"{}\"", escaped)
         } else {
-            String::new()
+            let msg = self
+                ._message
+                .trim()
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n");
+            if msg.is_empty() {
+                String::new()
+            } else {
+                format!(", tooltip=\"{}\"", msg)
+            }
         };
 
         let style = if colors.dashed {
@@ -320,34 +330,6 @@ impl CommitNode {
 /// Escapes characters that break DOT double-quoted strings.
 fn dot_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
-/// Formats a commit summary for display: removes "branch" from merge messages
-/// and splits "Merge X into Y" into two label lines.
-fn format_commit_summary(summary: &str) -> Vec<String> {
-    let s = if let Some(stripped) = summary.strip_prefix("Merge branch ") {
-        format!("Merge {}", stripped)
-    } else {
-        summary.to_string()
-    };
-    if let Some(into_pos) = s.find(" into ") {
-        vec![
-            s[..into_pos].to_string(),
-            format!("into {}", &s[into_pos + " into ".len()..]),
-        ]
-    } else {
-        vec![s]
-    }
-}
-
-/// Strips the remote URL from git merge messages.
-fn strip_merge_remote(msg: &str) -> String {
-    if let Some(of_pos) = msg.find(" of ") {
-        if let Some(into_offset) = msg[of_pos..].find(" into ") {
-            return format!("{}{}", &msg[..of_pos], &msg[of_pos + into_offset..]);
-        }
-    }
-    msg.to_string()
 }
 
 impl PartialEq for CommitNode {

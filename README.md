@@ -59,7 +59,7 @@ Options:
   -r, --repo-path <PATH>    Path to Git repository [default: .]
   -o, --output <FILE>       Output DOT file path [default: ggv-<repo-name>.dot]
   -n, --no-show             Generate DOT file and start web server without opening the browser
-  -f, --filter <CHARS>      Ref types: b=branches, r=remotes, t=tags, h=head [default: brt]
+  -f, --filter <CHARS>      Ref types: b=branches, r=remotes, t=tags, h=head, s=stashes [default: brts]
   -g, --gitlab-url <URL>    Base URL for compare links — GitLab or GitHub (auto-detected)
   -F, --from <COMMIT>       Limit graph to this commit and its descendants
   -X, --no-fetch            Skip automatic 'git fetch --tags --prune'

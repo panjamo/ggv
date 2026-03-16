@@ -6,6 +6,7 @@ pub struct RefFilter {
     pub remotes: bool,
     pub tags: bool,
     pub head: bool,
+    pub stashes: bool,
 }
 
 impl RefFilter {
@@ -16,6 +17,7 @@ impl RefFilter {
             remotes: filter_chars.contains(&'r'),
             tags: filter_chars.contains(&'t'),
             head: filter_chars.contains(&'h'),
+            stashes: filter_chars.contains(&'s'),
         }
     }
 
@@ -33,5 +35,9 @@ impl RefFilter {
 
     pub fn should_include_head(&self) -> bool {
         self.head
+    }
+
+    pub fn should_include_stashes(&self) -> bool {
+        self.stashes
     }
 }
