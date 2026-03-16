@@ -283,6 +283,7 @@ Open the SVG in a browser to use all interactive features:
 | Hover an edge | Tooltip listing commits condensed into that range |
 | Click an edge | Opens the GitLab / GitHub compare view for that range |
 | Hover the blue edge count label | Tooltip listing the files changed between the two nodes |
+| Size of the blue edge count label | Proportional to the number of changed files in that range |
 | Click the blue edge count label | Opens `git difftool` |
 | Right-click the blue edge count label | Context menu with AI diff options: full diff+log, diff-only, log-only |
 | Click a commit node | Copies the full 40-character SHA to the clipboard (amber flash confirms) |

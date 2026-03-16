@@ -55,6 +55,8 @@ Always run the complete quality check sequence:
 - `collect_path_commits()` — gathers commits between two nodes for hover tooltips
 - `add_tagged_commits()`, `add_root_commits()`, `add_branch_readmes()` — enrich commit nodes
 - `detect_gitlab_url()` / `parse_gitlab_remote_url()` — auto-detects GitLab base URL from the remote
+- `build_edge_attrs()` — constructs DOT edge attribute string; edge label font size scales logarithmically with the number of changed files (range 7–18 pt); edge thickness (`penwidth`) scales logarithmically with total changed lines (insertions + deletions, range 0.5–8.0)
+- `edge_penwidth()` — maps changed-line count to penwidth using `0.5 + log10(lines+1) * 1.2`, clamped to 0.5–8.0
 
 **Web Server (`web_server.rs`)**
 - Started automatically unless `-s` / `--svg-only` is passed
