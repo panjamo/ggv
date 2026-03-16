@@ -32,7 +32,7 @@ A Rust CLI tool that generates visual representations of Git repository structur
 - **gia** (optional): Required for AI diff summaries. Must be available in `PATH`.
   See [github.com/panjamo/gia](https://github.com/panjamo/gia).
 
-![Sample Git Graph](doc/ggv-gia.svg)
+![Sample Git Graph](doc/sample.svg)
 
 ## Installation
 
