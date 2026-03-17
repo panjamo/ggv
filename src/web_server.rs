@@ -489,7 +489,7 @@ fn handle_connection(
             };
             let base_prompt = prompt.as_deref().unwrap_or(&loaded_prompt).to_string();
             let effective_prompt = with_lang(&base_prompt, lang);
-            let summary = run_gia_log(repo_path, &sha1, &sha2, Some(&effective_prompt), use_audio);
+            let summary = run_gia_log(repo_path, &sha1, &sha2, Some(&effective_prompt), use_audio, &pathspecs);
             if summary.is_empty() {
                 send_response(
                     &mut stream,
@@ -1473,6 +1473,25 @@ fn is_valid_sha(s: &str) -> bool {
     s.len() >= 7 && s.len() <= 40 && s.chars().all(|c| c.is_ascii_hexdigit())
 }
 
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 2);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
+            | b'*' | b'?' | b'.' | b'/' | b'-' | b'_' | b'[' | b']' => {
+                out.push(b as char);
+            }
+            b' ' => out.push('+'),
+            _ => {
+                out.push('%');
+                out.push(char::from_digit((b >> 4) as u32, 16).unwrap().to_ascii_uppercase());
+                out.push(char::from_digit((b & 0xf) as u32, 16).unwrap().to_ascii_uppercase());
+            }
+        }
+    }
+    out
+}
+
 fn percent_decode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let bytes = s.as_bytes();
@@ -1530,20 +1549,25 @@ fn git_log_metadata(
     base: &str,
     sha1: &str,
     sha2: &str,
+    pathspecs: &[String],
 ) -> std::io::Result<std::process::Output> {
     let exclude_base = format!("^{}", base);
-    std::process::Command::new("git")
-        .args([
-            "-C",
-            repo_path,
-            "log",
-            GIT_LOG_METADATA_FORMAT,
-            "--name-status",
-            &exclude_base,
-            sha1,
-            sha2,
-        ])
-        .output()
+    let mut cmd = std::process::Command::new("git");
+    cmd.args([
+        "-C",
+        repo_path,
+        "log",
+        GIT_LOG_METADATA_FORMAT,
+        "--name-status",
+        &exclude_base,
+        sha1,
+        sha2,
+    ]);
+    if !pathspecs.is_empty() {
+        cmd.arg("--");
+        cmd.args(pathspecs);
+    }
+    cmd.output()
 }
 
 /// Resolves the best human-readable label for a commit SHA.
@@ -2286,10 +2310,15 @@ fn run_diff2html(
     };
 
     // Build links for the filter bar: git difftool and optional GitLab compare.
-    let difftool_url = format!("/diff?from={sha1}&to={sha2}");
-    let ai_summary_url = format!("/diff2html?from={sha1}&to={sha2}&ai=1");
-    let ai_diff_url = format!("/diff2html?from={sha1}&to={sha2}&ai=1&nolog=1");
-    let ai_commits_url = format!("/log-summary?from={sha1}&to={sha2}");
+    let filter_param = if filter_str.is_empty() {
+        String::new()
+    } else {
+        format!("&filter={}", percent_encode(filter_str))
+    };
+    let difftool_url = format!("/diff?from={sha1}&to={sha2}{filter_param}");
+    let ai_summary_url = format!("/diff2html?from={sha1}&to={sha2}&ai=1{filter_param}");
+    let ai_diff_url = format!("/diff2html?from={sha1}&to={sha2}&ai=1&nolog=1{filter_param}");
+    let ai_commits_url = format!("/log-summary?from={sha1}&to={sha2}{filter_param}");
     let ai_audio_checked = if gia_audio { "checked" } else { "" };
     let gitlab_link = gitlab_url.map(|base| {
         let compare_segment = if base.contains("github.com") {
@@ -2714,7 +2743,7 @@ fn run_gia_diff(
     // Commit metadata: log(both sides relative to base) with branch/tag decorations
     let meta_path = std::env::temp_dir().join("ggv_meta.txt");
     let has_meta = if include_log {
-        let log_out = match git_log_metadata(repo_path, &base, sha1, sha2) {
+        let log_out = match git_log_metadata(repo_path, &base, sha1, sha2, pathspecs) {
             Ok(out) => out,
             Err(e) => return format!("Error running git log: {e}"),
         };
@@ -2808,13 +2837,14 @@ fn run_gia_log(
     sha2: &str,
     prompt: Option<&str>,
     gia_audio: bool,
+    pathspecs: &[String],
 ) -> String {
     let base = match resolve_diff_base(repo_path, sha1, sha2) {
         Ok(b) => b,
         Err(e) => return format!("Error resolving log base: {e}"),
     };
 
-    let log_out = match git_log_metadata(repo_path, &base, sha1, sha2) {
+    let log_out = match git_log_metadata(repo_path, &base, sha1, sha2, pathspecs) {
         Ok(out) => out,
         Err(e) => return format!("Error running git log: {e}"),
     };
