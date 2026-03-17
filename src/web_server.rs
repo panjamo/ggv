@@ -2004,6 +2004,8 @@ fn diff2html_section(
   <input id="ggv-flt" class="ggv-flt-input" type="text" placeholder="*.cpp *.h  or  src/ *.cs">
   <button class="ggv-flt-btn" onclick="ggvApplyFilter()">Apply</button>
   <button class="ggv-flt-btn" onclick="ggvClearFilter()">Clear</button>
+  <span class="ggv-flt-label" style="margin-left:16px;">View:</span>
+  <button id="ggv-view-btn" class="ggv-flt-btn" onclick="ggvToggleView()">Side-by-side</button>
 </div>
 <div class="ggv-history">
   <div class="page">
@@ -2022,26 +2024,38 @@ fn diff2html_section(
 </div>
 <script>{js}</script>
 <script>
-document.getElementById('ggv-diff-content').innerHTML =
-  Diff2Html.html({diff_json}, {{
-    drawFileList: true,
-    matching: 'lines',
-    outputFormat: 'side-by-side'
+var ggvDiffData = {diff_json};
+function ggvRenderDiff(viewMode) {{
+  document.getElementById('ggv-diff-content').innerHTML =
+    Diff2Html.html(ggvDiffData, {{
+      drawFileList: true,
+      matching: 'lines',
+      outputFormat: viewMode || 'side-by-side'
+    }});
+  document.querySelectorAll('.d2h-file-wrapper').forEach(function(wrapper) {{
+    var header = wrapper.querySelector('.d2h-file-header');
+    var body = header && header.nextElementSibling;
+    if (!header || !body) return;
+    body.classList.add('ggv-file-body');
+    var arrow = document.createElement('span');
+    arrow.className = 'ggv-toggle';
+    arrow.textContent = '\u25bc';
+    header.appendChild(arrow);
+    header.addEventListener('click', function() {{
+      var collapsed = body.classList.toggle('ggv-collapsed');
+      header.classList.toggle('ggv-collapsed', collapsed);
+    }});
   }});
-document.querySelectorAll('.d2h-file-wrapper').forEach(function(wrapper) {{
-  var header = wrapper.querySelector('.d2h-file-header');
-  var body = header && header.nextElementSibling;
-  if (!header || !body) return;
-  body.classList.add('ggv-file-body');
-  var arrow = document.createElement('span');
-  arrow.className = 'ggv-toggle';
-  arrow.textContent = '\u25bc';
-  header.appendChild(arrow);
-  header.addEventListener('click', function() {{
-    var collapsed = body.classList.toggle('ggv-collapsed');
-    header.classList.toggle('ggv-collapsed', collapsed);
-  }});
-}});
+}}
+var ggvViewMode = localStorage.getItem('ggv-diff-view') || 'line-by-line';
+ggvRenderDiff(ggvViewMode);
+document.getElementById('ggv-view-btn').textContent = ggvViewMode === 'side-by-side' ? 'Side-by-side' : 'Unified';
+function ggvToggleView() {{
+  ggvViewMode = ggvViewMode === 'side-by-side' ? 'line-by-line' : 'side-by-side';
+  localStorage.setItem('ggv-diff-view', ggvViewMode);
+  document.getElementById('ggv-view-btn').textContent = ggvViewMode === 'side-by-side' ? 'Side-by-side' : 'Unified';
+  ggvRenderDiff(ggvViewMode);
+}}
 (function(){{
   var inp = document.getElementById('ggv-flt');
   var active = {filter_json};
@@ -2297,6 +2311,8 @@ fn run_diff2html(
   <input id="ggv-flt" class="ggv-flt-input" type="text" placeholder="*.cpp *.h  or  src/ *.cs">
   <button class="ggv-flt-btn" onclick="ggvApplyFilter()">Apply</button>
   <button class="ggv-flt-btn" onclick="ggvClearFilter()">Clear</button>
+  <span class="ggv-flt-label" style="margin-left:16px;">View:</span>
+  <button id="ggv-view-btn" class="ggv-flt-btn" onclick="ggvToggleView()">Side-by-side</button>
   <button class="ggv-flt-link" onclick="fetch('{difftool_url}')">Git Difftool</button>
   {gitlab_link}
   <button class="ggv-flt-link" onclick="ggvOpenAI('{ai_summary_url}')">AI Summary</button>
@@ -2319,26 +2335,38 @@ function ggvOpenAI(baseUrl) {{
 </div>
 <script>{js}</script>
 <script>
-document.getElementById('diff').innerHTML =
-  Diff2Html.html({diff_json}, {{
-    drawFileList: true,
-    matching: 'lines',
-    outputFormat: 'side-by-side'
+var ggvDiffData = {diff_json};
+function ggvRenderDiff(viewMode) {{
+  document.getElementById('diff').innerHTML =
+    Diff2Html.html(ggvDiffData, {{
+      drawFileList: true,
+      matching: 'lines',
+      outputFormat: viewMode || 'side-by-side'
+    }});
+  document.querySelectorAll('.d2h-file-wrapper').forEach(function(wrapper) {{
+    var header = wrapper.querySelector('.d2h-file-header');
+    var body = header && header.nextElementSibling;
+    if (!header || !body) return;
+    body.classList.add('ggv-file-body');
+    var arrow = document.createElement('span');
+    arrow.className = 'ggv-toggle';
+    arrow.textContent = '\u25bc';
+    header.appendChild(arrow);
+    header.addEventListener('click', function() {{
+      var collapsed = body.classList.toggle('ggv-collapsed');
+      header.classList.toggle('ggv-collapsed', collapsed);
+    }});
   }});
-document.querySelectorAll('.d2h-file-wrapper').forEach(function(wrapper) {{
-  var header = wrapper.querySelector('.d2h-file-header');
-  var body = header && header.nextElementSibling;
-  if (!header || !body) return;
-  body.classList.add('ggv-file-body');
-  var arrow = document.createElement('span');
-  arrow.className = 'ggv-toggle';
-  arrow.textContent = '\u25bc';
-  header.appendChild(arrow);
-  header.addEventListener('click', function() {{
-    var collapsed = body.classList.toggle('ggv-collapsed');
-    header.classList.toggle('ggv-collapsed', collapsed);
-  }});
-}});
+}}
+var ggvViewMode = localStorage.getItem('ggv-diff-view') || 'line-by-line';
+ggvRenderDiff(ggvViewMode);
+document.getElementById('ggv-view-btn').textContent = ggvViewMode === 'side-by-side' ? 'Side-by-side' : 'Unified';
+function ggvToggleView() {{
+  ggvViewMode = ggvViewMode === 'side-by-side' ? 'line-by-line' : 'side-by-side';
+  localStorage.setItem('ggv-diff-view', ggvViewMode);
+  document.getElementById('ggv-view-btn').textContent = ggvViewMode === 'side-by-side' ? 'Side-by-side' : 'Unified';
+  ggvRenderDiff(ggvViewMode);
+}}
 (function(){{
   var inp = document.getElementById('ggv-flt');
   var active = {filter_json};
