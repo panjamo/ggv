@@ -65,10 +65,6 @@ impl CommitNode {
         self.is_current_checkout = is_current;
     }
 
-    pub fn timestamp(&self) -> i64 {
-        self.timestamp
-    }
-
     /// Returns the best human-readable name for use in GitLab URLs.
     /// Priority: tag > local branch > remote branch > SHA hash.
     pub fn best_ref_for_url(&self) -> &str {

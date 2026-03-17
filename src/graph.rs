@@ -137,9 +137,15 @@ impl GitGraphviz {
             }
         }
 
+        // Cap the walk: once we have our samples we only need a rough count,
+        // not an exact one for every commit in a potentially huge range.
+        const MAX_WALK: usize = 2_000;
         for oid_result in revwalk {
             let Ok(oid) = oid_result else { break };
             total += 1;
+            if total > MAX_WALK {
+                break;
+            }
             if sample.len() < max {
                 let Ok(commit) = self.repo.find_commit(oid) else {
                     continue;
@@ -154,12 +160,12 @@ impl GitGraphviz {
         }
 
         if total > max {
-            sample.push((
-                "...".to_string(),
-                "(truncated)".to_string(),
-                String::new(),
-                String::new(),
-            ));
+            let label = if total > MAX_WALK {
+                format!("({}+ commits, truncated)", MAX_WALK)
+            } else {
+                "(truncated)".to_string()
+            };
+            sample.push(("...".to_string(), label, String::new(), String::new()));
         }
 
         (sample, total)
@@ -182,115 +188,243 @@ impl GitGraphviz {
             }
         };
 
-        if self.filter.should_include_branches() {
-            let branches = self.repo.branches(Some(BranchType::Local))?;
-            for branch_result in branches {
-                let (branch, _) = branch_result?;
-                let branch_name = match branch.name() {
-                    Ok(Some(name)) => name.to_string(),
-                    Ok(None) => "unknown".to_string(),
-                    Err(_) => {
-                        // Skip branches with non-UTF-8 names
-                        continue;
-                    }
-                };
-                let ref_name = format!("refs/heads/{}", branch_name);
-
-                if let Some(oid) = branch.get().target() {
-                    if self.current_branch_only && !is_on_current_branch(oid) {
-                        continue;
-                    }
-                    let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
-                    if let Some(commit_node) = referenced_commits.get_mut(&commit_id) {
-                        commit_node.add_ref(ref_name.clone());
-                    }
-                    branch_tips.insert(ref_name, commit_id);
-                }
-            }
-        }
-
-        if self.filter.should_include_remotes() {
-            let remote_branches = self.repo.branches(Some(BranchType::Remote))?;
-            for branch_result in remote_branches {
-                let (branch, _) = branch_result?;
-                let branch_name = match branch.name() {
-                    Ok(Some(name)) => name.to_string(),
-                    Ok(None) => "unknown".to_string(),
-                    Err(_) => {
-                        // Skip branches with non-UTF-8 names
-                        continue;
-                    }
-                };
-                let ref_name = format!("refs/remotes/{}", branch_name);
-
-                if let Some(oid) = branch.get().target() {
-                    if self.current_branch_only && !is_on_current_branch(oid) {
-                        continue;
-                    }
-                    let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
-                    if let Some(commit_node) = referenced_commits.get_mut(&commit_id) {
-                        commit_node.add_ref(ref_name.clone());
-                    }
-                    branch_tips.insert(ref_name, commit_id);
-                }
-            }
-        }
-
         let mut current_checkout_id: Option<String> = None;
-        if let Ok(head) = self.repo.head() {
-            if let Some(oid) = head.target() {
-                let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
-                current_checkout_id = Some(commit_id.clone());
 
-                if self.filter.should_include_head() {
-                    if let Some(commit_node) = referenced_commits.get_mut(&commit_id) {
-                        commit_node.add_ref("HEAD".to_string());
+        if self.limit > 0 {
+            // FAST PATH: one time-sorted revwalk to build the commit universe, then label
+            // only the refs whose tip falls within it. Skips root/merge-base walks entirely.
+            let mut revwalk = self.repo.revwalk()?;
+            revwalk.set_sorting(git2::Sort::TIME)?;
+
+            if self.filter.should_include_branches() {
+                let _ = revwalk.push_glob("refs/heads/*");
+            }
+            if self.filter.should_include_remotes() {
+                let _ = revwalk.push_glob("refs/remotes/*");
+            }
+            // Always seed from HEAD so detached-HEAD repos are covered
+            if let Some(oid) = head_oid {
+                let _ = revwalk.push(oid);
+            }
+            if self.filter.should_include_stashes() {
+                if let Ok(reflog) = self.repo.reflog("refs/stash") {
+                    for entry in reflog.iter() {
+                        let _ = revwalk.push(entry.id_new());
                     }
-                    branch_tips.insert("HEAD".to_string(), commit_id);
                 }
             }
-        }
 
-        if self.filter.should_include_stashes() {
-            if let Ok(reflog) = self.repo.reflog("refs/stash") {
-                for (index, entry) in reflog.iter().enumerate() {
-                    let oid = entry.id_new();
+            let mut universe: HashSet<String> = HashSet::new();
+            for oid_result in &mut revwalk {
+                if universe.len() >= self.limit {
+                    break;
+                }
+                let Ok(oid) = oid_result else { continue };
+                universe.insert(oid.to_string());
+            }
+
+            // Label commits in the universe with their branch refs
+            if self.filter.should_include_branches() {
+                for branch_result in self.repo.branches(Some(BranchType::Local))? {
+                    let (branch, _) = branch_result?;
+                    let branch_name = match branch.name() {
+                        Ok(Some(n)) => n.to_string(),
+                        Ok(None) => "unknown".to_string(),
+                        Err(_) => continue,
+                    };
+                    let ref_name = format!("refs/heads/{}", branch_name);
+                    if let Some(oid) = branch.get().target() {
+                        if self.current_branch_only && !is_on_current_branch(oid) {
+                            continue;
+                        }
+                        if universe.contains(&oid.to_string()) {
+                            let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
+                            if let Some(n) = referenced_commits.get_mut(&commit_id) {
+                                n.add_ref(ref_name.clone());
+                            }
+                            branch_tips.insert(ref_name, commit_id);
+                        }
+                    }
+                }
+            }
+
+            if self.filter.should_include_remotes() {
+                for branch_result in self.repo.branches(Some(BranchType::Remote))? {
+                    let (branch, _) = branch_result?;
+                    let branch_name = match branch.name() {
+                        Ok(Some(n)) => n.to_string(),
+                        Ok(None) => "unknown".to_string(),
+                        Err(_) => continue,
+                    };
+                    let ref_name = format!("refs/remotes/{}", branch_name);
+                    if let Some(oid) = branch.get().target() {
+                        if self.current_branch_only && !is_on_current_branch(oid) {
+                            continue;
+                        }
+                        if universe.contains(&oid.to_string()) {
+                            let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
+                            if let Some(n) = referenced_commits.get_mut(&commit_id) {
+                                n.add_ref(ref_name.clone());
+                            }
+                            branch_tips.insert(ref_name, commit_id);
+                        }
+                    }
+                }
+            }
+
+            if let Some(oid) = head_oid {
+                if universe.contains(&oid.to_string()) {
                     let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
-                    let ref_name = format!("stash@{{{}}}", index);
-                    if let Some(commit_node) = referenced_commits.get_mut(&commit_id) {
-                        commit_node.add_ref(ref_name.clone());
-                        commit_node.is_stash = true;
+                    current_checkout_id = Some(commit_id.clone());
+                    if self.filter.should_include_head() {
+                        if let Some(n) = referenced_commits.get_mut(&commit_id) {
+                            n.add_ref("HEAD".to_string());
+                        }
+                        branch_tips.insert("HEAD".to_string(), commit_id);
                     }
-                    branch_tips.insert(ref_name, commit_id);
                 }
             }
-        }
 
-        if self.filter.should_include_tags() {
-            self.add_tagged_commits(&mut referenced_commits, head_oid)?;
-        }
-
-        self.add_merge_base_commits(&mut referenced_commits, &branch_tips)?;
-
-        if let Some(ancestor_oid) = self.ancestor_oid {
-            let ancestor_id_str = ancestor_oid.to_string();
-
-            let commit_id = self.add_ref_commit(&mut referenced_commits, ancestor_oid)?;
-            if let Some(node) = referenced_commits.get_mut(&commit_id) {
-                node.add_ref("ROOT".to_string());
+            if self.filter.should_include_stashes() {
+                if let Ok(reflog) = self.repo.reflog("refs/stash") {
+                    for (index, entry) in reflog.iter().enumerate() {
+                        let oid = entry.id_new();
+                        if universe.contains(&oid.to_string()) {
+                            let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
+                            let ref_name = format!("stash@{{{}}}", index);
+                            if let Some(n) = referenced_commits.get_mut(&commit_id) {
+                                n.add_ref(ref_name.clone());
+                                n.is_stash = true;
+                            }
+                            branch_tips.insert(ref_name, commit_id);
+                        }
+                    }
+                }
             }
 
-            referenced_commits.retain(|id, _| {
-                if *id == ancestor_id_str {
-                    return true;
+            if self.filter.should_include_tags() {
+                let mut tag_commits: Vec<(Oid, String)> = Vec::new();
+                self.repo.tag_foreach(|oid, name| {
+                    let tag_name = String::from_utf8_lossy(name).to_string();
+                    if let Ok(obj) = self.repo.find_object(oid, None) {
+                        if let Ok(commit_obj) = obj.peel(git2::ObjectType::Commit) {
+                            if universe.contains(&commit_obj.id().to_string()) {
+                                tag_commits.push((commit_obj.id(), tag_name));
+                            }
+                        }
+                    }
+                    true
+                })?;
+                for (commit_oid, tag_name) in tag_commits {
+                    let commit_id = self.add_ref_commit(&mut referenced_commits, commit_oid)?;
+                    if let Some(n) = referenced_commits.get_mut(&commit_id) {
+                        n.add_tag(tag_name);
+                    }
                 }
-                id.parse::<Oid>()
-                    .ok()
-                    .and_then(|oid| self.repo.graph_descendant_of(oid, ancestor_oid).ok())
-                    .unwrap_or(false)
-            });
+            }
+
+            eprintln!("Applied limit: showing {} most recent commits", self.limit);
         } else {
-            self.add_root_commits(&mut referenced_commits)?;
+            // NORMAL PATH: enumerate all refs, then add roots and merge bases
+
+            if self.filter.should_include_branches() {
+                let branches = self.repo.branches(Some(BranchType::Local))?;
+                for branch_result in branches {
+                    let (branch, _) = branch_result?;
+                    let branch_name = match branch.name() {
+                        Ok(Some(name)) => name.to_string(),
+                        Ok(None) => "unknown".to_string(),
+                        Err(_) => continue,
+                    };
+                    let ref_name = format!("refs/heads/{}", branch_name);
+                    if let Some(oid) = branch.get().target() {
+                        if self.current_branch_only && !is_on_current_branch(oid) {
+                            continue;
+                        }
+                        let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
+                        if let Some(commit_node) = referenced_commits.get_mut(&commit_id) {
+                            commit_node.add_ref(ref_name.clone());
+                        }
+                        branch_tips.insert(ref_name, commit_id);
+                    }
+                }
+            }
+
+            if self.filter.should_include_remotes() {
+                let remote_branches = self.repo.branches(Some(BranchType::Remote))?;
+                for branch_result in remote_branches {
+                    let (branch, _) = branch_result?;
+                    let branch_name = match branch.name() {
+                        Ok(Some(name)) => name.to_string(),
+                        Ok(None) => "unknown".to_string(),
+                        Err(_) => continue,
+                    };
+                    let ref_name = format!("refs/remotes/{}", branch_name);
+                    if let Some(oid) = branch.get().target() {
+                        if self.current_branch_only && !is_on_current_branch(oid) {
+                            continue;
+                        }
+                        let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
+                        if let Some(commit_node) = referenced_commits.get_mut(&commit_id) {
+                            commit_node.add_ref(ref_name.clone());
+                        }
+                        branch_tips.insert(ref_name, commit_id);
+                    }
+                }
+            }
+
+            if let Ok(head) = self.repo.head() {
+                if let Some(oid) = head.target() {
+                    let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
+                    current_checkout_id = Some(commit_id.clone());
+                    if self.filter.should_include_head() {
+                        if let Some(commit_node) = referenced_commits.get_mut(&commit_id) {
+                            commit_node.add_ref("HEAD".to_string());
+                        }
+                        branch_tips.insert("HEAD".to_string(), commit_id);
+                    }
+                }
+            }
+
+            if self.filter.should_include_stashes() {
+                if let Ok(reflog) = self.repo.reflog("refs/stash") {
+                    for (index, entry) in reflog.iter().enumerate() {
+                        let oid = entry.id_new();
+                        let commit_id = self.add_ref_commit(&mut referenced_commits, oid)?;
+                        let ref_name = format!("stash@{{{}}}", index);
+                        if let Some(commit_node) = referenced_commits.get_mut(&commit_id) {
+                            commit_node.add_ref(ref_name.clone());
+                            commit_node.is_stash = true;
+                        }
+                        branch_tips.insert(ref_name, commit_id);
+                    }
+                }
+            }
+
+            if self.filter.should_include_tags() {
+                self.add_tagged_commits(&mut referenced_commits, head_oid)?;
+            }
+
+            if let Some(ancestor_oid) = self.ancestor_oid {
+                self.add_merge_base_commits(&mut referenced_commits, &branch_tips)?;
+                let ancestor_id_str = ancestor_oid.to_string();
+                let commit_id = self.add_ref_commit(&mut referenced_commits, ancestor_oid)?;
+                if let Some(node) = referenced_commits.get_mut(&commit_id) {
+                    node.add_ref("ROOT".to_string());
+                }
+                referenced_commits.retain(|id, _| {
+                    if *id == ancestor_id_str {
+                        return true;
+                    }
+                    id.parse::<Oid>()
+                        .ok()
+                        .and_then(|oid| self.repo.graph_descendant_of(oid, ancestor_oid).ok())
+                        .unwrap_or(false)
+                });
+            } else {
+                self.add_merge_base_commits(&mut referenced_commits, &branch_tips)?;
+                self.add_root_commits(&mut referenced_commits)?;
+            }
         }
 
         self.add_branch_readmes(&mut referenced_commits, &branch_tips)?;
@@ -305,23 +439,6 @@ impl GitGraphviz {
             if let Some(commit) = referenced_commits.get_mut(&checkout_id) {
                 commit.set_current_checkout(true);
             }
-        }
-
-        // Apply commit limit filter if specified
-        if self.limit > 0 {
-            let mut commits_by_time: Vec<(&String, &CommitNode)> =
-                referenced_commits.iter().collect();
-            commits_by_time.sort_by(|a, b| b.1.timestamp().cmp(&a.1.timestamp()));
-
-            let keep_ids: HashSet<String> = commits_by_time
-                .into_iter()
-                .take(self.limit)
-                .map(|(id, _)| id.clone())
-                .collect();
-
-            referenced_commits.retain(|id, _| keep_ids.contains(id));
-
-            eprintln!("Applied limit: showing {} most recent commits", self.limit);
         }
 
         let condensed_graph = self.build_condensed_graph(&referenced_commits)?;
@@ -519,14 +636,8 @@ impl GitGraphviz {
             let tag_name = String::from_utf8_lossy(name).to_string();
 
             if let Ok(tag_target) = self.repo.find_object(oid, None) {
-                let commit_oid = match tag_target.kind() {
-                    Some(git2::ObjectType::Commit) => Some(oid),
-                    Some(git2::ObjectType::Tag) => tag_target.as_tag().map(|tag| tag.target_id()),
-                    _ => None,
-                };
-
-                if let Some(commit_oid) = commit_oid {
-                    tag_commits.push((commit_oid, tag_name));
+                if let Ok(commit_obj) = tag_target.peel(git2::ObjectType::Commit) {
+                    tag_commits.push((commit_obj.id(), tag_name));
                 }
             }
             true
