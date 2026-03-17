@@ -928,9 +928,9 @@ fn diff_tree_stats(
         .deltas()
         .filter_map(|d| {
             d.new_file()
-                .path()
-                .or_else(|| d.old_file().path())
-                .map(|p| p.to_string_lossy().into_owned())
+                .path_bytes()
+                .or_else(|| d.old_file().path_bytes())
+                .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
         })
         .collect();
     Some((files, total_lines))
