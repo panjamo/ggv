@@ -36,6 +36,7 @@ Always run the complete quality check sequence:
 - `max_diff_files: usize` — diff file limit for the web UI (default 100); if exceeded the diff view is suppressed and only commit cards are shown; `0` disables the limit
 - `gia_audio: bool` — defaults to `false`; set to `true` via `-N` / `--gia-audio` to enable microphone recording in gia
 - `limit: usize` — restricts the graph to the N most recent commits by timestamp (default 0 = no limit); set via `-L` / `--limit`
+- `age_fade: bool` — defaults to `true`; pass `-a` / `--age-fade` to disable; fades nodes and edges linearly by age: oldest commit = 20% opacity, newest = 100%
 
 **RefFilter (`main.rs`)**
 - Parses the `--filter` string (`b`=branches, `r`=remotes, `t`=tags, `h`=HEAD, `s`=stashes); default is `"brts"`
@@ -55,8 +56,10 @@ Always run the complete quality check sequence:
 - `collect_path_commits()` — gathers commits between two nodes for hover tooltips
 - `add_tagged_commits()`, `add_root_commits()`, `add_branch_readmes()` — enrich commit nodes
 - `detect_gitlab_url()` / `parse_gitlab_remote_url()` — auto-detects GitLab base URL from the remote
-- `build_edge_attrs()` — constructs DOT edge attribute string; edge label font size scales logarithmically with the number of changed files (range 7–18 pt); edge thickness (`penwidth`) scales logarithmically with total changed lines (insertions + deletions, range 0.5–8.0)
+- `build_edge_attrs()` — constructs DOT edge attribute string; edge color is a heatmap (grey→orange→red, logarithmic, normalized across all edges) encoding changed-file count; edge thickness (`penwidth`) scales logarithmically with total changed lines (insertions + deletions, range 0.5–8.0); edge label (commit count) uses fixed fontsize=8
 - `edge_penwidth()` — maps changed-line count to penwidth using `0.5 + log10(lines+1) * 1.2`, clamped to 0.5–8.0
+- `edge_heatmap_color()` — maps file count to a grey→orange→red color using a logarithmic ratio normalized to the max file count across all edges
+- `apply_alpha()` (`commit_node.rs`) — appends an alpha byte to `#RRGGBB` hex colors for age-fade; opacity computed linearly: `0.2 + 0.8 * (ts - min_ts) / (max_ts - min_ts)`; edge opacity is the average of its two endpoint commit opacities
 
 **Web Server (`web_server.rs`)**
 - Started automatically unless `-s` / `--svg-only` is passed
@@ -84,7 +87,8 @@ Always run the complete quality check sequence:
 4. Apply commit limit filter if `--limit N` is set: sort all commits by timestamp (newest first) and keep only top N
 5. Build condensed graph: keep only referenced commits plus necessary merge-junction commits
 6. Pre-compute condensed parent edges and forge (GitLab/GitHub) compare URLs
-7. Write DOT file with styled nodes and edges
+7. Compute per-commit opacity for age-fade (linear, oldest=0.2, newest=1.0) if `--age-fade` is active (default on)
+8. Write DOT file with styled nodes and edges; apply alpha to node fill/border/font colors and edge heatmap color
 8. Start web server that renders DOT → SVG in-browser via @hpcc-js/wasm-graphviz (WASM)
 9. Unless `--no-show`: open browser to view the rendered SVG
 

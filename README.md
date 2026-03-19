@@ -8,12 +8,14 @@ A Rust CLI tool that generates visual representations of Git repository structur
 
 - **Comprehensive Visualization**: Displays commits, branches, remote branches, tags, and HEAD
 - **Condensed Graph**: Only referenced commits (branch tips, tags, root, merge junctions) are shown — intermediate commits are skipped for clarity
+- **Age Fade**: Nodes and edges are faded linearly by age — oldest commit = 20% opacity, newest = 100%; on by default, disable with `-a`
 - **Dual Theme**: Dark and light theme — branch nodes are color-coded by type (main, develop, feature/\*, release/\*, hotfix/\*); dark is the default, switch with `-t light`
 - **Auto Fetch**: Runs `git fetch --tags --prune` before generating the graph to ensure tags are current and stale remote-tracking refs are removed
 - **SVG Output**: Generates high-quality SVG images served via a local web server
 - **Ref Filtering**: Choose which ref types to include (local branches, remotes, tags, HEAD)
 - **Current-Branch View**: `-c` hides all refs not on the ancestry path of HEAD — shows only what is reachable from the current checkout
 - **Subtree View**: Limit the graph to a specific commit and all its descendants (`-F`)
+- **Edge Encoding**: Edge thickness encodes changed lines (LOC, logarithmic); edge color is a heatmap (grey→orange→red, logarithmic) encoding changed-file count, normalized across all edges; the number label shows commit count at uniform size
 - **Forge Integration**: Clickable graph edges linking to GitLab or GitHub compare views, with hover tooltips showing the condensed commits — auto-detected from the remote URL
 - **Drag-to-Compare**: Drag any commit node onto another to open a GitLab or GitHub compare view for that arbitrary range — order is corrected automatically (always `older...newer`)
 - **SHA Copy**: Click any commit node to copy its full 40-character SHA to the clipboard (amber border flash confirms)
@@ -73,6 +75,7 @@ Options:
   -M, --max-diff-files <N>  Max changed files to render in diff view; if exceeded only commit list is shown (0 = unlimited) [default: 100]
   -s, --splines <MODE>      Edge routing style: auto (polyline if edges >1200, else ortho), line, ortho, curved, polyline, spline [default: auto]
   -S, --stats               Show graph statistics (node count, edge count) and exit without starting web server
+  -a, --age-fade            Disable age-fade (on by default: oldest = 20% opacity, newest = 100%, linear)
   -h, --help                Print help
   -V, --version             Print version
 ```
@@ -213,6 +216,14 @@ ggv -N --lang en-US   # enable audio + set language
 
 The process stays alive after the SVG is opened, serving requests until Ctrl+C. Each `ggv` instance gets its own OS-assigned port, so multiple instances can run simultaneously.
 
+### Age Fade
+
+Age-fade is on by default. Nodes and edges are faded linearly by timestamp — the oldest commit in the graph gets 20% opacity, the newest gets 100%. To disable:
+
+```bash
+ggv -a
+```
+
 ### Graph Statistics and Splines Mode
 
 Show graph statistics (node and edge count) without starting the web server:
@@ -282,10 +293,13 @@ Open the SVG in a browser to use all interactive features:
 |-------------|--------|
 | Hover an edge | Tooltip listing commits condensed into that range |
 | Click an edge | Opens the GitLab / GitHub compare view for that range |
-| Hover the blue edge count label | Tooltip listing the files changed between the two nodes |
-| Size of the blue edge count label | Proportional to the number of changed files in that range |
-| Click the blue edge count label | Opens `git difftool` |
-| Right-click the blue edge count label | Context menu with AI diff options: full diff+log, diff-only, log-only |
+| Edge thickness | Logarithmically proportional to changed lines (insertions + deletions) |
+| Edge color | Heatmap (logarithmic, normalized): grey = few files → orange → red = many files |
+| Edge number label | Count of commits condensed into that range (uniform size) |
+| Hover the edge count label | Tooltip listing the files changed between the two nodes |
+| Click the edge count label | Opens `git difftool` |
+| Right-click the edge count label | Context menu with AI diff options: full diff+log, diff-only, log-only |
+| Node/edge opacity | Age-fade: older = more transparent (linear, 20–100%); disable with `-a` |
 | Click a commit node | Copies the full 40-character SHA to the clipboard (amber flash confirms) |
 | Drag one commit node onto another | Opens the forge compare view for that range — always `older...newer` |
 | Ctrl + drag onto another node | Opens the diff web server diff for that range |

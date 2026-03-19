@@ -69,6 +69,7 @@ fn main() -> Result<()> {
         args.theme,
         args.current_branch,
         args.limit,
+        args.age_fade,
     )?;
 
     git_viz.generate_dot(&output, &args.splines)?;
@@ -91,6 +92,7 @@ fn main() -> Result<()> {
         splines: args.splines.clone(),
         web_server_url: String::new(), // filled in by start()
         limit: args.limit,
+        age_fade: args.age_fade,
     });
     let (handle, port) = web_server::start(
         args.web_port,

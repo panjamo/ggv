@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
-use crate::commit_node::CommitNode;
+use crate::commit_node::{apply_alpha, CommitNode};
 use crate::filter::RefFilter;
 use crate::theme::Theme;
 use crate::utils::{repo_name_from_path, time_ago};
@@ -29,6 +29,7 @@ pub struct GitGraphviz {
     theme: Theme,
     current_branch_only: bool,
     limit: usize,
+    age_fade: bool,
 }
 
 impl GitGraphviz {
@@ -40,6 +41,7 @@ impl GitGraphviz {
         theme: Theme,
         current_branch_only: bool,
         limit: usize,
+        age_fade: bool,
     ) -> Result<Self> {
         let repo = Repository::open(repo_path)
             .with_context(|| format!("Failed to open repository at: {}", repo_path))?;
@@ -66,6 +68,7 @@ impl GitGraphviz {
             theme,
             current_branch_only,
             limit,
+            age_fade,
         })
     }
 
@@ -502,9 +505,38 @@ impl GitGraphviz {
             splines_mode, graph_tooltip
         )?;
 
+        // Compute per-commit opacity for age-fade (linear: oldest=0.2, newest=1.0)
+        let opacity_map: HashMap<String, f32> = if self.age_fade {
+            let min_ts = condensed_graph
+                .values()
+                .map(|c| c.timestamp)
+                .min()
+                .unwrap_or(0);
+            let max_ts = condensed_graph
+                .values()
+                .map(|c| c.timestamp)
+                .max()
+                .unwrap_or(0);
+            condensed_graph
+                .iter()
+                .map(|(id, c)| {
+                    let opacity = if max_ts == min_ts {
+                        1.0
+                    } else {
+                        (0.2 + 0.8 * (c.timestamp - min_ts) as f32 / (max_ts - min_ts) as f32)
+                            .clamp(0.2, 1.0)
+                    };
+                    (id.clone(), opacity)
+                })
+                .collect()
+        } else {
+            HashMap::new()
+        };
+
         // Write all nodes
         for commit in condensed_graph.values() {
-            writeln!(writer, "  {}", commit.get_dot_node(self.theme))?;
+            let opacity = opacity_map.get(&commit.id).copied().unwrap_or(1.0);
+            writeln!(writer, "  {}", commit.get_dot_node(self.theme, opacity))?;
         }
 
         // Collect all (parent_id, child_id) pairs that need edge attributes
@@ -605,6 +637,13 @@ impl GitGraphviz {
                         (u.as_deref(), t.as_deref(), *c, f.as_deref(), *l, *fc)
                     })
                     .unwrap_or((None, None, 0, None, 0, 0));
+                let edge_opacity = if self.age_fade {
+                    let po = opacity_map.get(parent_id.as_str()).copied().unwrap_or(1.0);
+                    let co = opacity_map.get(child_id.as_str()).copied().unwrap_or(1.0);
+                    (po + co) / 2.0
+                } else {
+                    1.0
+                };
                 let attrs = build_edge_attrs(
                     url,
                     tooltip,
@@ -613,6 +652,7 @@ impl GitGraphviz {
                     lines,
                     file_count,
                     max_file_count,
+                    edge_opacity,
                 );
                 writeln!(writer, "  \"{}\" -> \"{}\"{}", parent_id, child_id, attrs)?;
             }
@@ -1076,8 +1116,8 @@ fn edge_heatmap_color(file_count: usize, max_file_count: usize) -> String {
         return "#B0B0B0".to_string(); // light grey
     }
     // Logarithmic ratio: small counts quickly move away from grey
-    let ratio = ((file_count as f64 + 1.0).log10() / (max_file_count as f64 + 1.0).log10())
-        .clamp(0.0, 1.0);
+    let ratio =
+        ((file_count as f64 + 1.0).log10() / (max_file_count as f64 + 1.0).log10()).clamp(0.0, 1.0);
     // Interpolate: grey (#B0B0B0) -> orange (#FF8C00) -> red (#CC0000)
     let (r, g, b) = if ratio < 0.5 {
         let t = ratio * 2.0;
@@ -1103,6 +1143,7 @@ fn build_edge_attrs(
     lines: usize,
     file_count: usize,
     max_file_count: usize,
+    opacity: f32,
 ) -> String {
     let url_part = url.map_or(String::new(), |u| {
         format!("URL=\"{}\", target=\"_blank\"", u)
@@ -1124,7 +1165,7 @@ fn build_edge_attrs(
         format!("id=\"files:{}\"", escaped)
     });
     let penwidth_part = format!("penwidth={:.1}", edge_penwidth(lines));
-    let color = edge_heatmap_color(file_count, max_file_count);
+    let color = apply_alpha(&edge_heatmap_color(file_count, max_file_count), opacity);
     let color_part = format!("color=\"{}\"", color);
     let parts: Vec<&str> = [
         &url_part,

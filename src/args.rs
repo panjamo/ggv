@@ -130,4 +130,13 @@ pub struct Args {
         default_value_t = 0
     )]
     pub limit: usize,
+
+    #[arg(
+        short = 'a',
+        long,
+        help = "Disable age-fade: by default older nodes and edges are faded (oldest = 20% opacity, newest = 100%, linear)",
+        action = clap::ArgAction::SetFalse,
+        default_value_t = true
+    )]
+    pub age_fade: bool,
 }

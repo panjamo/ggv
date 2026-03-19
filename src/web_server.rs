@@ -26,6 +26,7 @@ pub struct RegenerateConfig {
     /// Filled in by `start()` once the port is known.
     pub web_server_url: String,
     pub limit: usize,
+    pub age_fade: bool,
 }
 
 fn regenerate(config: &RegenerateConfig) {
@@ -43,6 +44,7 @@ fn regenerate(config: &RegenerateConfig) {
         config.theme,
         config.current_branch_only,
         config.limit,
+        config.age_fade,
     ) {
         Ok(v) => v,
         Err(e) => {

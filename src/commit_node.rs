@@ -7,7 +7,7 @@ pub struct CommitNode {
     pub id: String,
     _short_id: String,
     _message: String,
-    timestamp: i64,
+    pub timestamp: i64,
     tags: BTreeSet<String>,
     refs: BTreeSet<String>,
     is_tip: bool,
@@ -86,7 +86,7 @@ impl CommitNode {
         &self.id
     }
 
-    pub fn get_dot_node(&self, theme: Theme) -> String {
+    pub fn get_dot_node(&self, theme: Theme, opacity: f32) -> String {
         let (label_parts, colors, has_local_branch, has_remote_branch, has_other_refs) =
             self.build_label_parts(theme);
 
@@ -129,6 +129,7 @@ impl CommitNode {
             has_remote_branch,
             has_other_refs,
             &node_id,
+            opacity,
         )
     }
 
@@ -267,6 +268,7 @@ impl CommitNode {
         has_remote_branch: bool,
         _has_other_refs: bool,
         node_id: &str,
+        opacity: f32,
     ) -> String {
         let mut label = label_parts
             .iter()
@@ -315,12 +317,29 @@ impl CommitNode {
             colors.base_penwidth
         };
         let font_size: u8 = if colors.dashed { 8 } else { 9 };
+        let fill = apply_alpha(colors.fill, opacity);
+        let border = apply_alpha(colors.border, opacity);
+        let font = apply_alpha(colors.font, opacity);
 
         format!(
             "\"{}\" [id=\"{}\", label=\"{}\", shape=box, style=\"{}\", color=\"{}\", fillcolor=\"{}\", fontname=\"Arial\", fontsize={}, fontcolor=\"{}\", penwidth={}, width=0.9, height=0.4{}]",
-            self.id, node_id, label, style, colors.border, colors.fill, font_size, colors.font, penwidth, tooltip_attr
+            self.id, node_id, label, style, border, fill, font_size, font, penwidth, tooltip_attr
         )
     }
+}
+
+/// Appends an alpha byte to a `#RRGGBB` hex color. Returns unchanged for named/transparent colors.
+pub fn apply_alpha(color: &str, opacity: f32) -> String {
+    if opacity >= 0.9999 {
+        return color.to_string();
+    }
+    if let Some(hex) = color.strip_prefix('#') {
+        if hex.len() == 6 {
+            let alpha = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+            return format!("#{}{:02X}", hex, alpha);
+        }
+    }
+    color.to_string()
 }
 
 /// Escapes characters that break DOT double-quoted strings.
