@@ -489,7 +489,7 @@ impl GitGraphviz {
         )?;
         writeln!(
             writer,
-            "  edge [color=\"{}\", arrowhead=none, dir=none];",
+            "  edge [color=\"{}\", arrowhead=none, dir=none, fontsize=8, fontname=\"Arial\", fontcolor=\"#94A3B8\"];",
             tc.edge_color
         )?;
         let graph_tooltip = build_graph_tooltip(&self.repo)
@@ -524,6 +524,14 @@ impl GitGraphviz {
 
         // Compute file lists and changed-line counts for all edges via git2
         let batch_files = batch_diff_file_lists(&self.repo, &pairs_ordered);
+
+        // Compute max file_count across all edges for heatmap normalization
+        let max_file_count: usize = batch_files
+            .values()
+            .map(|(v, _)| v.len())
+            .max()
+            .unwrap_or(1)
+            .max(1);
 
         // Build edge attributes: (parent_id, child_id) -> (url, tooltip, count)
         let mut edge_attrs: EdgeAttrs = HashMap::new();
@@ -597,7 +605,15 @@ impl GitGraphviz {
                         (u.as_deref(), t.as_deref(), *c, f.as_deref(), *l, *fc)
                     })
                     .unwrap_or((None, None, 0, None, 0, 0));
-                let attrs = build_edge_attrs(url, tooltip, count, files, lines, file_count);
+                let attrs = build_edge_attrs(
+                    url,
+                    tooltip,
+                    count,
+                    files,
+                    lines,
+                    file_count,
+                    max_file_count,
+                );
                 writeln!(writer, "  \"{}\" -> \"{}\"{}", parent_id, child_id, attrs)?;
             }
         }
@@ -1055,6 +1071,30 @@ fn edge_penwidth(line_count: usize) -> f32 {
     pw.clamp(0.5, 8.0)
 }
 
+fn edge_heatmap_color(file_count: usize, max_file_count: usize) -> String {
+    if max_file_count == 0 || file_count == 0 {
+        return "#B0B0B0".to_string(); // light grey
+    }
+    // Logarithmic ratio: small counts quickly move away from grey
+    let ratio = ((file_count as f64 + 1.0).log10() / (max_file_count as f64 + 1.0).log10())
+        .clamp(0.0, 1.0);
+    // Interpolate: grey (#B0B0B0) -> orange (#FF8C00) -> red (#CC0000)
+    let (r, g, b) = if ratio < 0.5 {
+        let t = ratio * 2.0;
+        let r = (0xB0 as f64 + t * (0xFF - 0xB0) as f64).round() as u8;
+        let g = (0xB0 as f64 + t * (0x8C as f64 - 0xB0 as f64)).round() as u8;
+        let b = (0xB0 as f64 + t * (0x00 as f64 - 0xB0 as f64)).round() as u8;
+        (r, g, b)
+    } else {
+        let t = (ratio - 0.5) * 2.0;
+        let r = (0xFF as f64 + t * (0xCC as f64 - 0xFF as f64)).round() as u8;
+        let g = (0x8C as f64 + t * (0x00 as f64 - 0x8C as f64)).round() as u8;
+        let b = 0u8;
+        (r, g, b)
+    };
+    format!("#{:02X}{:02X}{:02X}", r, g, b)
+}
+
 fn build_edge_attrs(
     url: Option<&str>,
     tooltip: Option<&str>,
@@ -1062,6 +1102,7 @@ fn build_edge_attrs(
     files: Option<&str>,
     lines: usize,
     file_count: usize,
+    max_file_count: usize,
 ) -> String {
     let url_part = url.map_or(String::new(), |u| {
         format!("URL=\"{}\", target=\"_blank\"", u)
@@ -1074,15 +1115,7 @@ fn build_edge_attrs(
         format!("tooltip=\"{}\"", escaped)
     });
     let label_part = if count > 0 {
-        let fs = if file_count == 0 {
-            8.0f32
-        } else {
-            (7.0 + (file_count as f64 + 1.0).log10() as f32 * 4.0).clamp(7.0, 18.0)
-        };
-        format!(
-            "xlabel=\"{}\", fontsize={:.0}, fontcolor=\"#94A3B8\"",
-            count, fs
-        )
+        format!("xlabel=\"{}\"", count)
     } else {
         String::new()
     };
@@ -1091,12 +1124,15 @@ fn build_edge_attrs(
         format!("id=\"files:{}\"", escaped)
     });
     let penwidth_part = format!("penwidth={:.1}", edge_penwidth(lines));
+    let color = edge_heatmap_color(file_count, max_file_count);
+    let color_part = format!("color=\"{}\"", color);
     let parts: Vec<&str> = [
         &url_part,
         &tooltip_part,
         &label_part,
         &id_part,
         &penwidth_part,
+        &color_part,
     ]
     .iter()
     .filter(|s| !s.is_empty())

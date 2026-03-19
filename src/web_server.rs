@@ -489,7 +489,14 @@ fn handle_connection(
             };
             let base_prompt = prompt.as_deref().unwrap_or(&loaded_prompt).to_string();
             let effective_prompt = with_lang(&base_prompt, lang);
-            let summary = run_gia_log(repo_path, &sha1, &sha2, Some(&effective_prompt), use_audio, &pathspecs);
+            let summary = run_gia_log(
+                repo_path,
+                &sha1,
+                &sha2,
+                Some(&effective_prompt),
+                use_audio,
+                &pathspecs,
+            );
             if summary.is_empty() {
                 send_response(
                     &mut stream,
@@ -1202,23 +1209,16 @@ setInterval(() => fetch('/heartbeat').catch(() => {{}}), 2000);
       <button onclick="ggvHelp()" style="background:none;border:none;color:#718096;font-size:20px;cursor:pointer;line-height:1;padding:0 4px;">&#x2715;</button>
     </div>
 
-    <!-- Edge labels -->
-    <div style="margin-bottom:18px;">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4a5568;margin-bottom:10px;">Edge Labels (numbers on edges)</div>
-      <table style="border-collapse:collapse;width:100%;font-size:13px;">
-        <tr><td style="padding:4px 0 4px 0;width:56%;color:#a0aec0;">Number value</td><td style="padding:4px 0;color:#cbd5e1;">Number of commits condensed into that edge</td></tr>
-        <tr><td style="padding:4px 0;color:#a0aec0;">Label size</td><td style="padding:4px 0;color:#cbd5e1;">Proportional to the number of changed files in that range</td></tr>
-        <tr><td style="padding:4px 0;color:#a0aec0;">Hover edge label</td><td style="padding:4px 0;color:#cbd5e1;">Tooltip listing the changed files</td></tr>
-        <tr><td style="padding:4px 0;color:#a0aec0;">Left-click edge label</td><td style="padding:4px 0;color:#cbd5e1;">Opens <code style="background:#2d3748;border-radius:3px;padding:1px 5px;font-size:11px;">git difftool</code> for that range</td></tr>
-        <tr><td style="padding:4px 0;color:#a0aec0;">Right-click edge label</td><td style="padding:4px 0;color:#cbd5e1;">Context menu: AI diff+log, AI diff-only, AI log-only</td></tr>
-      </table>
-    </div>
-
     <!-- Edges -->
     <div style="margin-bottom:18px;">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#4a5568;margin-bottom:10px;">Edges (lines between commits)</div>
       <table style="border-collapse:collapse;width:100%;font-size:13px;">
-        <tr><td style="padding:4px 0;width:56%;color:#a0aec0;">Line thickness</td><td style="padding:4px 0;color:#cbd5e1;">Proportional to the number of changed lines (insertions + deletions) in that range</td></tr>
+        <tr><td style="padding:4px 0;width:56%;color:#a0aec0;">Number label</td><td style="padding:4px 0;color:#cbd5e1;">Number of commits condensed into that edge</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Line thickness</td><td style="padding:4px 0;color:#cbd5e1;">Logarithmically proportional to changed lines (insertions + deletions)</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Line color</td><td style="padding:4px 0;color:#cbd5e1;">Heatmap (logarithmic): <span style="color:#B0B0B0;">&#9632;</span> grey = few files &rarr; <span style="color:#FF8C00;">&#9632;</span> orange &rarr; <span style="color:#CC0000;">&#9632;</span> red = many files; normalized across all edges</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Hover edge label</td><td style="padding:4px 0;color:#cbd5e1;">Tooltip listing the changed files</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Left-click edge label</td><td style="padding:4px 0;color:#cbd5e1;">Opens <code style="background:#2d3748;border-radius:3px;padding:1px 5px;font-size:11px;">git difftool</code> for that range</td></tr>
+        <tr><td style="padding:4px 0;color:#a0aec0;">Right-click edge label</td><td style="padding:4px 0;color:#cbd5e1;">Context menu: AI diff+log, AI diff-only, AI log-only</td></tr>
         <tr><td style="padding:4px 0;color:#a0aec0;">Hover edge</td><td style="padding:4px 0;color:#cbd5e1;">Tooltip listing all commits condensed into that range</td></tr>
         <tr><td style="padding:4px 0;color:#a0aec0;">Click edge</td><td style="padding:4px 0;color:#cbd5e1;">Opens the GitLab / GitHub compare view for that range</td></tr>
       </table>
@@ -1477,15 +1477,32 @@ fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 2);
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
-            | b'*' | b'?' | b'.' | b'/' | b'-' | b'_' | b'[' | b']' => {
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'*'
+            | b'?'
+            | b'.'
+            | b'/'
+            | b'-'
+            | b'_'
+            | b'['
+            | b']' => {
                 out.push(b as char);
             }
             b' ' => out.push('+'),
             _ => {
                 out.push('%');
-                out.push(char::from_digit((b >> 4) as u32, 16).unwrap().to_ascii_uppercase());
-                out.push(char::from_digit((b & 0xf) as u32, 16).unwrap().to_ascii_uppercase());
+                out.push(
+                    char::from_digit((b >> 4) as u32, 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
+                out.push(
+                    char::from_digit((b & 0xf) as u32, 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
             }
         }
     }
